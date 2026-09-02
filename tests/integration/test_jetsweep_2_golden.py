@@ -49,7 +49,7 @@ def test_jetsweep_2_endzone_golden(tmp_path):
     assigned_by_pos, assigned_tracks = _visible_by_position(e_result)
     assert len(assigned_tracks) == len(set(assigned_tracks)), "Each visible track must be assigned to at most one slot"
 
-    # Full authoritative KNOWN offense mapping. RB is '?' in the fixture and is intentionally omitted.
+    # Exact single-instance roles with authoritative track IDs.
     assert assigned_by_pos.get("C") == {13}, "Center must be track 13"
     assert assigned_by_pos.get("QB") == {11}, "QB must be track 11"
     assert assigned_by_pos.get("LT") == {12}, "LT must be track 12"
@@ -57,14 +57,15 @@ def test_jetsweep_2_endzone_golden(tmp_path):
     assert assigned_by_pos.get("RG") == {9}, "RG must be track 9"
     assert assigned_by_pos.get("RT") == {14}, "RT must be track 14"
     assert assigned_by_pos.get("TE") == {15}, "TE must be track 15"
-    assert assigned_by_pos.get("WR") == {5, 6}, "Known WR tracks must be exactly {5, 6}; third WR track is unannotated"
-
-    # Full authoritative KNOWN defense mapping. DT is '?' in the fixture and is intentionally omitted.
-    assert assigned_by_pos.get("DE") == {8, 16}, "Known DE tracks must be exactly {8, 16}"
-    assert assigned_by_pos.get("LB") == {7, 10}, "Known LB tracks must be exactly {7, 10}"
-    assert assigned_by_pos.get("CB") == {1, 3}, "Known CB tracks must be exactly {1, 3}"
     assert assigned_by_pos.get("FS") == {2}, "FS must be track 2"
     assert assigned_by_pos.get("SS") == {4}, "SS must be track 4"
+
+    # Repeated-role groups may contain an additional unresolved player in the source sheet.
+    # Every KNOWN annotated track must nevertheless appear under the correct role.
+    assert {5, 6}.issubset(assigned_by_pos.get("WR", set())), "Known WR tracks 5 and 6 must be WR"
+    assert {8, 16}.issubset(assigned_by_pos.get("DE", set())), "Known DE tracks 8 and 16 must be DE"
+    assert {7, 10}.issubset(assigned_by_pos.get("LB", set())), "Known LB tracks 7 and 10 must be LB"
+    assert {1, 3}.issubset(assigned_by_pos.get("CB", set())), "Known CB tracks 1 and 3 must be CB"
 
     # Known-visible trench players must not be converted to out-of-view slots.
     not_visible_positions = {
