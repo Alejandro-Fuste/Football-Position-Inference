@@ -1,0 +1,26 @@
+weights:
+  action_semantics: 0.35
+  geometry: 0.25
+  learned_model: 0.20
+  formation_constraints: 0.10
+  paired_view: 0.10
+
+sideline_weights:
+  action_semantics: 0.30
+  geometry: 0.25
+  learned_model: 0.25
+  formation_constraints: 0.10
+  paired_view: 0.10
+
+endzone_weights:
+  action_semantics: 0.35
+  geometry: 0.30
+  learned_model: 0.15
+  formation_constraints: 0.10
+  paired_view: 0.10
+
+presnap:
+  lookback_frames: 30
+  snap_exclusion_frames: 3
+  minimum_stable_frames: 8
+  aggregation: median

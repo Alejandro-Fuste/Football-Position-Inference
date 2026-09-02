@@ -1,0 +1,64 @@
+offense:
+  positions:
+    - QB
+    - RB
+    - FB
+    - WR
+    - TE
+    - LT
+    - LG
+    - C
+    - RG
+    - RT
+  unique_roles:
+    - C
+    - LT
+    - LG
+    - RG
+    - RT
+    - QB
+  allowed_counts:
+    C: [1, 1]
+    LT: [1, 1]
+    LG: [1, 1]
+    RG: [1, 1]
+    RT: [1, 1]
+    QB: [1, 1]
+    RB: [0, 3]
+    FB: [0, 1]
+    WR: [0, 5]
+    TE: [0, 3]
+
+defense:
+  positions:
+    - DE
+    - DT
+    - LB
+    - CB
+    - FS
+    - SS
+  allowed_counts:
+    DE: [0, 4]
+    DT: [0, 4]
+    LB: [0, 5]
+    CB: [0, 4]
+    FS: [0, 2]
+    SS: [0, 2]
+
+groups:
+  OL: ["LT", "LG", "C", "RG", "RT"]
+  DL: ["DE", "DT"]
+  LB: ["LB"]
+  DB: ["CB", "FS", "SS"]
+  SKILL_OFFENSE: ["QB", "RB", "FB", "WR", "TE"]
+
+position_aliases:
+  RCB: CB
+  LCB: CB
+  SLB: LB
+  MLB: LB
+  WLB: LB
+  LDE: DE
+  RDE: DE
+  DT-1: DT
+  SAF: FS

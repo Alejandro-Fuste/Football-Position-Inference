@@ -1,0 +1,8 @@
+pairing:
+  adjacency_window: 1
+  expected_sequence: ["Sideline", "Endzone"]
+  minimum_confidence: 0.70
+  weights:
+    order_adjacency: 0.40
+    metadata_view: 0.30
+    action_compatibility: 0.30

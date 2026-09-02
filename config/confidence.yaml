@@ -1,0 +1,4 @@
+confidence:
+  auto_accept: 0.90
+  review_recommended: 0.70
+  pair_resolution_margin: 0.12

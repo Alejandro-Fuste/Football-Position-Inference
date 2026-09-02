@@ -1,0 +1,57 @@
+BallSnap:
+  aliases: ["Ball Snap", "Action_BallSnap", "Snap"]
+  roles:
+    C: 1.0
+  mode: hard_anchor
+
+SnapReceive:
+  aliases: ["Snap Receive", "Action_SnapReceive", "Receive Snap"]
+  roles:
+    QB: 1.0
+  mode: hard_anchor
+
+Toss:
+  aliases: ["Toss", "Action_Toss", "Pitch"]
+  roles:
+    QB: 0.95
+  mode: strong
+
+JetMotion:
+  aliases: ["Jet Motion", "Action_JetMotion", "Motion"]
+  roles:
+    WR: 0.90
+    TE: 0.10
+  mode: strong
+
+BallCarry_JetSweep:
+  play: JetSweep
+  aliases: ["Ball Carry", "Action_BallCarry", "Carry"]
+  roles:
+    WR: 0.85
+    RB: 0.15
+  mode: play_conditioned
+
+LeadBlock:
+  aliases: ["Lead Block", "Action_LeadBlock"]
+  roles:
+    TE: 0.45
+    FB: 0.35
+    OL: 0.20
+  mode: soft
+
+BlockSecondLevel:
+  aliases: ["Block Second Level", "Action_BlockSecondLevel", "Second Level Block"]
+  roles:
+    OL: 0.60
+    TE: 0.40
+  mode: soft
+
+ZoneBlock:
+  aliases: ["Zone Block", "Action_ZoneBlock", "End of OL Block"]
+  roles:
+    LT: 0.20
+    LG: 0.20
+    C: 0.20
+    RG: 0.20
+    RT: 0.20
+  mode: soft
