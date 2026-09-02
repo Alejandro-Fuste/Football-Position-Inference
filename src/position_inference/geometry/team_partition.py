@@ -12,10 +12,13 @@ def partition_teams(
     qb_track_id: Optional[int] = None,
     direction: str = "left",
 ) -> Tuple[List[int], List[int]]:
-    """
-    Partitions valid player tracks into Offense and Defense candidate pools.
-    Borderline trench tracks without hard offense seeds are made available to defense
-    so the joint optimizer can decide their role.
+    """Build offense/defense *eligibility pools* for the joint optimizer.
+
+    Strong semantic anchors are side-locked. Geometrically clear backfield/second-level
+    tracks receive a preferred side, while ambiguous trench, wing, and unresolved tracks
+    remain eligible for BOTH sides so CP-SAT can make the final side/role decision.
+
+    This function deliberately does not force every unresolved player onto defense.
     """
     if action_annotations is None:
         action_annotations = []
@@ -43,74 +46,68 @@ def partition_teams(
     if qb_track_id and qb_track_id in player_tids:
         offense_seeds.add(qb_track_id)
 
-    # 1. Action side seeds
+    # Strong action-side evidence locks a track to one side. Lower-confidence action
+    # evidence is intentionally left ambiguous for the global solver.
     for act in action_annotations:
-        if act.actor_track_id and act.actor_track_id in player_tids:
-            s_scores = track_side_scores.get(act.actor_track_id, {})
-            if s_scores.get("offense", 0.0) >= 0.70:
-                offense_seeds.add(act.actor_track_id)
-            elif s_scores.get("defense", 0.0) >= 0.70:
-                defense_seeds.add(act.actor_track_id)
+        tid = act.actor_track_id
+        if not tid or tid not in player_tids:
+            continue
+        s_scores = track_side_scores.get(tid, {})
+        off_score = s_scores.get("offense", 0.0)
+        def_score = s_scores.get("defense", 0.0)
+        if off_score >= 0.85 and off_score >= def_score + 0.15:
+            offense_seeds.add(tid)
+        elif def_score >= 0.85 and def_score >= off_score + 0.15:
+            defense_seeds.add(tid)
 
     offense_tids: Set[int] = set(offense_seeds)
     defense_tids: Set[int] = set(defense_seeds)
 
-    # 2. Backfield players: clearly on offense side (depth_offense >= 0.5)
     for tid in player_tids:
         if tid in offense_seeds or tid in defense_seeds:
             continue
+
         feat = spatial_feats.get(tid, {})
         depth_off = feat.get("depth_offense", 0.0)
         abs_lat = abs(feat.get("lateral_offense", 0.0))
 
-        if depth_off >= 0.5:
+        # Clearly offensive backfield tracks may be preferred to offense, but remain
+        # defense-eligible only when they are close enough to the neutral zone to be
+        # geometrically ambiguous.
+        if depth_off >= 1.25:
             offense_tids.add(tid)
-        elif depth_off <= -1.2 and abs_lat <= 2.0:
-            defense_tids.add(tid)
-
-    # 3. Trench players (abs_lat <= 1.4, -0.7 <= depth_off < 0.5)
-    trench_tids = [
-        t for t in player_tids
-        if t not in offense_seeds and t not in defense_seeds
-        and abs(spatial_feats.get(t, {}).get("lateral_offense", 0.0)) <= 1.4
-    ]
-    for tid in trench_tids:
-        feat = spatial_feats.get(tid, {})
-        depth_off = feat.get("depth_offense", 0.0)
-        if depth_off >= -0.65:
-            offense_tids.add(tid)
-        # Trench players on LOS without hard offense seeds are also eligible for defense
-        if depth_off <= 0.3:
-            defense_tids.add(tid)
-
-    # 4. Wing matchups: for wide players (abs_lat > 1.4)
-    left_wing = [
-        t for t in player_tids
-        if spatial_feats.get(t, {}).get("lateral_offense", 0.0) > 1.4
-    ]
-    right_wing = [
-        t for t in player_tids
-        if spatial_feats.get(t, {}).get("lateral_offense", 0.0) < -1.4
-    ]
-
-    for wing in [left_wing, right_wing]:
-        if not wing:
-            continue
-        wing_sorted = sorted(wing, key=lambda t: spatial_feats.get(t, {}).get("depth_offense", -99.0), reverse=True)
-        for rank, tid in enumerate(wing_sorted):
-            if tid in offense_seeds or tid in defense_seeds:
-                continue
-            if rank == 0 or (rank < len(wing_sorted) / 2 and len(offense_tids) < 11):
-                offense_tids.add(tid)
-            else:
+            if depth_off <= 1.75:
                 defense_tids.add(tid)
+            continue
 
-    # 5. Any remaining unassigned players go to defense
+        # Clearly defensive second/deep level players can be preferred to defense.
+        if depth_off <= -1.75:
+            defense_tids.add(tid)
+            if depth_off >= -2.25 and abs_lat <= 2.5:
+                offense_tids.add(tid)
+            continue
+
+        # Neutral-zone/trench players are deliberately eligible for BOTH sides. This
+        # is especially important in endzone views where OL and DL overlap heavily.
+        if abs_lat <= 1.8 and -1.75 < depth_off < 1.25:
+            offense_tids.add(tid)
+            defense_tids.add(tid)
+            continue
+
+        # Wide/wing tracks can be WR/TE or CB/S depending on depth and camera view.
+        # Keep them on both candidate sides unless semantics side-lock them.
+        offense_tids.add(tid)
+        defense_tids.add(tid)
+
+    # Safety net: any valid player-like track not classified above remains eligible
+    # for BOTH sides rather than being silently converted into a defender.
     for tid in player_tids:
         if tid not in offense_tids and tid not in defense_tids:
+            offense_tids.add(tid)
             defense_tids.add(tid)
 
-    off_final = sorted(list(offense_tids - defense_seeds))
-    def_final = sorted(list(defense_tids - offense_seeds))
+    # Strong seeds stay side-locked.
+    off_final = sorted(offense_tids - defense_seeds)
+    def_final = sorted(defense_tids - offense_seeds)
 
     return off_final, def_final
