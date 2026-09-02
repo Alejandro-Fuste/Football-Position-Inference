@@ -43,13 +43,7 @@ def _sideline_geometry_scores(depth_los: float, depth_off: float, lat_off: float
 
 
 def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float, dist_c: float) -> Dict[str, float]:
-    """Endzone-specific geometry priors.
-
-    ``depth_off`` is positive on the offense/backfield side of the Center and negative
-    across the LOS on the defensive side. ``depth_los`` is the exact inverse. The OL and
-    defensive-front scoring bands therefore must not overlap broadly; otherwise a DE just
-    across the line can receive the same tackle score as a true offensive lineman.
-    """
+    """Endzone-specific geometry priors with explicit OL/TE/DL separation."""
     abs_lat = abs(lat_off)
     scores: Dict[str, float] = {}
 
@@ -58,31 +52,28 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     scores["RB"] = 1.0 if depth_off >= 2.0 and abs_lat <= 1.35 else (0.55 if depth_off >= 1.3 and abs_lat <= 1.5 else 0.08)
     scores["FB"] = 0.75 if 1.0 <= depth_off <= 2.4 and abs_lat <= 1.2 else 0.08
 
-    # Offensive linemen should be on (or slightly behind) the Center's LOS row.
-    # Allow a small negative tolerance for detector/perspective noise, but do not let
-    # clearly defensive-side tracks compete strongly for OL slots.
-    on_ol_band = -0.20 <= depth_off <= 0.90 and dist_c > 0.18 and abs_lat <= 1.75
+    # The five offensive linemen occupy the compact interior surface. In an endzone
+    # view a TE may be attached just outside the tackle, so the tackle band must stop
+    # before the broader TE band rather than overlapping it almost completely.
+    on_ol_band = -0.20 <= depth_off <= 0.90 and dist_c > 0.18 and abs_lat <= 1.35
     wrong_side_for_ol = depth_off < -0.20
 
     if wrong_side_for_ol:
         scores["LT"] = scores["LG"] = scores["RG"] = scores["RT"] = 0.02
     else:
-        scores["LT"] = 0.98 if on_ol_band and lat_off > 0.45 else (0.68 if on_ol_band and lat_off > 0 else 0.06)
-        scores["LG"] = 0.98 if on_ol_band and 0.05 < lat_off <= 0.75 else (0.64 if on_ol_band and lat_off > 0 else 0.06)
-        scores["RG"] = 0.98 if on_ol_band and -0.80 <= lat_off < -0.05 else (0.64 if on_ol_band and lat_off < 0 else 0.06)
-        scores["RT"] = 0.98 if on_ol_band and lat_off < -0.45 else (0.68 if on_ol_band and lat_off < 0 else 0.06)
+        scores["LT"] = 0.98 if on_ol_band and 0.45 < lat_off <= 1.35 else (0.60 if on_ol_band and lat_off > 0 else 0.05)
+        scores["LG"] = 0.98 if on_ol_band and 0.05 < lat_off <= 0.72 else (0.58 if on_ol_band and lat_off > 0 else 0.05)
+        scores["RG"] = 0.98 if on_ol_band and -0.78 <= lat_off < -0.05 else (0.58 if on_ol_band and lat_off < 0 else 0.05)
+        scores["RT"] = 0.98 if on_ol_band and -1.35 <= lat_off < -0.45 else (0.60 if on_ol_band and lat_off < 0 else 0.05)
 
-    # TE is attached/near-attached to the offensive surface and likewise should not be
-    # scored strongly when the track is clearly across the LOS.
-    scores["TE"] = 0.92 if -0.20 <= depth_off <= 1.0 and 0.9 <= abs_lat <= 2.0 else 0.08
+    # Attached TE lives immediately outside the tackle surface. Some overlap around
+    # 1.15-1.35 is retained for perspective noise, but action semantics break ties.
+    scores["TE"] = 0.94 if -0.20 <= depth_off <= 1.05 and 1.15 <= abs_lat <= 2.10 else (0.30 if -0.20 <= depth_off <= 1.05 and 0.95 <= abs_lat < 1.15 else 0.07)
     scores["WR"] = 0.65 if abs_lat >= 2.2 else (0.30 if abs_lat >= 1.6 else 0.08)
 
-    # Defensive front should be on the defensive side of the Center. A small tolerance
-    # around zero handles neutral-zone/perspective noise without making OL and DL symmetric.
     on_def_front = -0.10 <= depth_los <= 1.75
     scores["DT"] = 0.98 if on_def_front and abs_lat <= 0.70 else 0.06
     scores["DE"] = 0.98 if on_def_front and 0.50 <= abs_lat <= 1.90 else 0.06
-
     scores["LB"] = 0.96 if 1.30 <= depth_los <= 4.2 and abs_lat <= 2.3 else (0.35 if 0.75 <= depth_los <= 3.0 else 0.08)
     scores["CB"] = 0.60 if abs_lat >= 2.2 and depth_los >= 0.0 else (0.22 if abs_lat >= 1.8 else 0.06)
 
@@ -95,6 +86,35 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     else:
         scores["FS"] = scores["SS"] = scores["SAF"] = 0.06
     return scores
+
+
+def _apply_endzone_role_family_semantics(
+    geom_scores: Dict[str, float], action_scores: Dict[str, float]
+) -> Dict[str, float]:
+    """Use action semantics to resolve endzone role-family ambiguity.
+
+    Configured actions may emit both a concrete role such as TE and a generic ``OL``
+    family score. The optimizer has exact LT/LG/RG/RT slots but no generic OL slot. When
+    concrete TE evidence clearly exceeds generic OL evidence, suppress exact OL geometry
+    for that track instead of discarding the family distinction.
+    """
+    adjusted = dict(geom_scores)
+    te_evidence = action_scores.get("TE", 0.0)
+    ol_family_evidence = action_scores.get("OL", 0.0)
+
+    if te_evidence >= 0.35 and te_evidence >= ol_family_evidence + 0.15:
+        for role in ("LT", "LG", "RG", "RT"):
+            adjusted[role] *= 0.20
+        adjusted["TE"] = max(adjusted.get("TE", 0.0), 0.70)
+
+    # Conversely, clear generic OL evidence without comparable TE evidence should
+    # reinforce the exact OL family rather than disappearing because there is no OL slot.
+    if ol_family_evidence >= 0.50 and ol_family_evidence >= te_evidence + 0.15:
+        for role in ("LT", "LG", "RG", "RT"):
+            adjusted[role] = max(adjusted.get(role, 0.0), 0.55)
+        adjusted["TE"] *= 0.60
+
+    return adjusted
 
 
 def compute_candidate_role_scores(
@@ -135,7 +155,10 @@ def compute_candidate_role_scores(
         dist_c = s_feat.get("dist_center", 0.0)
 
         if view == "endzone":
-            geom_scores = _endzone_geometry_scores(depth_los, depth_off, lat_off, dist_c)
+            geom_scores = _apply_endzone_role_family_semantics(
+                _endzone_geometry_scores(depth_los, depth_off, lat_off, dist_c),
+                a_score,
+            )
         else:
             geom_scores = _sideline_geometry_scores(depth_los, depth_off, lat_off, dist_c)
 
