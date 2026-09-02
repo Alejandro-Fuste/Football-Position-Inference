@@ -10,56 +10,36 @@ def fuse_paired_views(
     sideline_result: ViewInferenceResult,
     endzone_result: ViewInferenceResult,
 ) -> Tuple[ViewInferenceResult, ViewInferenceResult, List[str]]:
-    """
-    Legacy post-hoc paired fusion interface.
-    Compares existing Pass 1 or Pass 2 results, reconciles out-of-view slots, and flags discrepancies.
-    """
+    """Legacy post-hoc paired fusion interface retained for compatibility."""
     cfg = get_confidence_config().get("confidence", {})
     resolution_margin = cfg.get("pair_resolution_margin", 0.12)
-
     warnings: List[str] = []
 
     s_hyp = extract_personnel_hypothesis(sideline_result.assignments)
     e_hyp = extract_personnel_hypothesis(endzone_result.assignments)
-
     sideline_result.personnel_hypothesis = s_hyp
     endzone_result.personnel_hypothesis = e_hyp
-
-    shared_personnel = dict(s_hyp) if sideline_result.view_confidence >= endzone_result.view_confidence else dict(e_hyp)
 
     s_map = {a.slot_id: a for a in sideline_result.assignments if a.slot_state != "INACTIVE_SLOT"}
     e_map = {a.slot_id: a for a in endzone_result.assignments if a.slot_state != "INACTIVE_SLOT"}
 
-    all_slots = set(s_map.keys()) | set(e_map.keys())
-
-    for slot_id in all_slots:
+    for slot_id in set(s_map) | set(e_map):
         s_assign = s_map.get(slot_id)
         e_assign = e_map.get(slot_id)
-
         if not s_assign or not e_assign:
             continue
-
-        # Check for role mismatch if both are visible
-        if s_assign.visibility == "visible" and e_assign.visibility == "visible":
-            if s_assign.position != e_assign.position:
-                diff = abs(s_assign.confidence - e_assign.confidence)
-                if diff < resolution_margin:
-                    warnings.append(
-                        f"Paired disagreement on slot {slot_id}: Sideline={s_assign.position} ({s_assign.confidence:.2f}) vs Endzone={e_assign.position} ({e_assign.confidence:.2f})"
-                    )
-                    s_assign.flags.append("pair_disagreement")
-                    e_assign.flags.append("pair_disagreement")
-                elif s_assign.confidence > e_assign.confidence:
-                    e_assign.position = s_assign.position
-                    e_assign.evidence["paired_fusion_override"] = s_assign.confidence
-                else:
-                    s_assign.position = e_assign.position
-                    s_assign.evidence["paired_fusion_override"] = e_assign.confidence
-
-        # If sideline establishes complete formation but endzone player is out_of_view
+        if s_assign.visibility == "visible" and e_assign.visibility == "visible" and s_assign.position != e_assign.position:
+            diff = abs(s_assign.confidence - e_assign.confidence)
+            if diff < resolution_margin:
+                warnings.append(
+                    f"Paired disagreement on slot {slot_id}: Sideline={s_assign.position} ({s_assign.confidence:.2f}) "
+                    f"vs Endzone={e_assign.position} ({e_assign.confidence:.2f})"
+                )
+                s_assign.flags.append("pair_disagreement")
+                e_assign.flags.append("pair_disagreement")
         if s_assign.visibility == "visible" and e_assign.visibility == "out_of_view":
             e_assign.slot_state = "ACTIVE_NOT_VISIBLE"
-            e_assign.evidence["sideline_confirmed_slot"] = s_assign.confidence
+            e_assign.evidence["sideline_confirmed_slot"] = float(s_assign.confidence)
 
     if warnings:
         sideline_result.status = "PAIR_REVIEW_REQUIRED"
@@ -68,6 +48,44 @@ def fuse_paired_views(
         endzone_result.warnings.extend(warnings)
 
     return sideline_result, endzone_result, warnings
+
+
+def _personnel_count_disagreements(a: Dict[str, int], b: Dict[str, int]) -> List[str]:
+    return [pos for pos in sorted(set(a) | set(b)) if a.get(pos, 0) != b.get(pos, 0)]
+
+
+def _build_shared_personnel_prior(
+    sideline_result: ViewInferenceResult,
+    endzone_result: ViewInferenceResult,
+    sideline_hyp: Dict[str, int],
+    endzone_hyp: Dict[str, int],
+) -> Tuple[Dict[str, int], str]:
+    """Build a formation-count prior without allowing endzone uncertainty to redefine personnel.
+
+    In this dataset the sideline clip normally shows the complete 22-player formation and is
+    therefore the primary source for *personnel counts*. The endzone clip contributes role and
+    alignment evidence inside that package, but does not override counts merely because its scalar
+    confidence is slightly higher.
+    """
+    if sideline_result.view == "sideline":
+        return dict(sideline_hyp), "sideline"
+    if endzone_result.view == "sideline":
+        return dict(endzone_hyp), "endzone_argument_was_sideline"
+
+    # If metadata is unavailable/misclassified, use the result with more visible active players;
+    # only then use confidence as a tie-breaker.
+    def visible_count(result: ViewInferenceResult) -> int:
+        return sum(1 for a in result.assignments if a.slot_state == "ACTIVE_VISIBLE" and a.track_id is not None)
+
+    s_vis = visible_count(sideline_result)
+    e_vis = visible_count(endzone_result)
+    if s_vis != e_vis:
+        return (dict(sideline_hyp), "more_visible_players") if s_vis > e_vis else (dict(endzone_hyp), "more_visible_players")
+    return (
+        (dict(sideline_hyp), "confidence_fallback")
+        if sideline_result.confidence >= endzone_result.confidence
+        else (dict(endzone_hyp), "confidence_fallback")
+    )
 
 
 def fuse_paired_views_two_pass(
@@ -79,21 +97,14 @@ def fuse_paired_views_two_pass(
     dataset_summary: Optional[Union[str, Path, Dict[str, VideoMetadata]]] = None,
     pair_id: str = "pair_001",
 ) -> Tuple[ViewInferenceResult, ViewInferenceResult, Dict[str, Any]]:
-    """
-    True Two-Pass Paired-View Evidence Fusion:
-    PASS 1: Independent preliminary inference on Sideline and Endzone
-    FUSION: Combine personnel hypotheses using domain-specific weights
-            (Sideline stronger for full personnel & skill width; Endzone for interior box)
-    PASS 2: Re-run CP-SAT solve for both views using shared paired priors
-    Returns: Final Pass 2 Sideline result, Final Pass 2 Endzone result, and pair_summary metadata.
-    """
+    """Run independent Pass 1 inference, fuse formation evidence, then perform Pass 2 solves."""
     from position_inference.pipeline import infer_video_positions
 
     cfg = get_confidence_config().get("confidence", {})
     resolution_margin = cfg.get("pair_resolution_margin", 0.12)
     pair_warnings: List[str] = []
 
-    # --- PASS 1: Independent Preliminary Inference ---
+    # PASS 1: independent inference.
     s_pass1 = infer_video_positions(
         sideline_mot,
         action_source,
@@ -111,44 +122,20 @@ def fuse_paired_views_two_pass(
 
     s_prelim_hyp = dict(s_pass1.personnel_hypothesis)
     e_prelim_hyp = dict(e_pass1.personnel_hypothesis)
-
-    # --- FUSION: Reconcile Shared Personnel Prior ---
-    shared_prior: Dict[str, int] = {}
-
-    # Sideline is authoritative for skill positions and defensive backfield (wider view)
-    for pos in ("WR", "TE", "RB", "FB", "CB", "FS", "SS"):
-        s_count = s_prelim_hyp.get(pos, 0)
-        e_count = e_prelim_hyp.get(pos, 0)
-        if s_pass1.view == "sideline":
-            shared_prior[pos] = s_count
-        elif e_pass1.view == "sideline":
-            shared_prior[pos] = e_count
-        else:
-            # Fallback to higher confidence view
-            shared_prior[pos] = s_count if s_pass1.confidence >= e_pass1.confidence else e_count
-
-    # Endzone has direct view down trench for OL spacing & interior front (DE/DT)
-    for pos in ("DE", "DT", "LB"):
-        s_count = s_prelim_hyp.get(pos, 0)
-        e_count = e_prelim_hyp.get(pos, 0)
-        if e_pass1.view == "endzone" and e_count > 0:
-            shared_prior[pos] = e_count if e_pass1.confidence >= s_pass1.confidence else s_count
-        else:
-            shared_prior[pos] = s_count
-
-    # Check for personnel conflict margin
-    disagreement_count = sum(
-        1 for pos in set(s_prelim_hyp.keys()) | set(e_prelim_hyp.keys())
-        if s_prelim_hyp.get(pos, 0) != e_prelim_hyp.get(pos, 0)
+    shared_prior, prior_source = _build_shared_personnel_prior(
+        s_pass1, e_pass1, s_prelim_hyp, e_prelim_hyp
     )
-    conf_diff = abs(s_pass1.confidence - e_pass1.confidence)
 
-    if disagreement_count >= 3 and conf_diff < resolution_margin:
+    disagreements = _personnel_count_disagreements(s_prelim_hyp, e_prelim_hyp)
+    conf_diff = abs(s_pass1.confidence - e_pass1.confidence)
+    if len(disagreements) >= 3 and conf_diff < resolution_margin:
         pair_warnings.append(
-            f"Ambiguous personnel disagreement across paired views (diff: {conf_diff:.3f} < threshold {resolution_margin}). Manual review required."
+            "Ambiguous preliminary personnel disagreement across paired views; "
+            f"using {prior_source} personnel counts and requiring review. "
+            f"Differing roles: {', '.join(disagreements)}."
         )
 
-    # --- PASS 2: Final Inference Guided by Shared Priors ---
+    # PASS 2: solve each independent track space using the shared formation counts.
     s_pass2 = infer_video_positions(
         sideline_mot,
         action_source,
@@ -166,23 +153,20 @@ def fuse_paired_views_two_pass(
         solver_pass=2,
     )
 
-    # Attach diagnostic provenance & preliminary hypotheses to results
-    s_pass2.preliminary_personnel_hypothesis = s_prelim_hyp
-    s_pass2.paired_personnel_prior = shared_prior
-    s_pass2.pair_resolution_margin = float(conf_diff)
+    for result, prelim in ((s_pass2, s_prelim_hyp), (e_pass2, e_prelim_hyp)):
+        result.preliminary_personnel_hypothesis = prelim
+        result.paired_personnel_prior = shared_prior
+        result.pair_resolution_margin = float(conf_diff)
 
-    e_pass2.preliminary_personnel_hypothesis = e_prelim_hyp
-    e_pass2.paired_personnel_prior = shared_prior
-    e_pass2.pair_resolution_margin = float(conf_diff)
-
-    # Reconcile slot states for endzone out-of-view slots
+    # Add paired support evidence to missing endzone slots without inventing a confidence floor.
     s_active_map = {a.slot_id: a for a in s_pass2.assignments if a.slot_state != "INACTIVE_SLOT"}
     for a in e_pass2.assignments:
-        if a.slot_state == "ACTIVE_NOT_VISIBLE":
-            s_match = s_active_map.get(a.slot_id)
-            if s_match and s_match.visibility == "visible":
-                a.evidence["sideline_confirmed_slot"] = float(s_match.confidence)
-                a.confidence = max(a.confidence, 0.82)
+        if a.slot_state != "ACTIVE_NOT_VISIBLE":
+            continue
+        s_match = s_active_map.get(a.slot_id)
+        if s_match and s_match.visibility == "visible":
+            a.evidence["sideline_confirmed_slot"] = float(s_match.confidence)
+            a.evidence["paired_visibility_support"] = 1.0
 
     if pair_warnings:
         s_pass2.status = "PAIR_REVIEW_REQUIRED"
@@ -199,6 +183,8 @@ def fuse_paired_views_two_pass(
         "preliminary_sideline_personnel": s_prelim_hyp,
         "preliminary_endzone_personnel": e_prelim_hyp,
         "shared_personnel_prior": shared_prior,
+        "shared_personnel_source": prior_source,
+        "personnel_disagreements": disagreements,
         "final_sideline_personnel": s_pass2.personnel_hypothesis,
         "final_endzone_personnel": e_pass2.personnel_hypothesis,
         "pair_resolution_margin": float(conf_diff),
@@ -221,5 +207,4 @@ def fuse_paired_views_two_pass(
 
     s_pass2.pair_diagnostics = pair_summary
     e_pass2.pair_diagnostics = pair_summary
-
     return s_pass2, e_pass2, pair_summary
