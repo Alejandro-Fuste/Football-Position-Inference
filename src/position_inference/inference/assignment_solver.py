@@ -4,6 +4,8 @@ from ortools.sat.python import cp_model
 
 from position_inference.data.schemas import PositionAssignment, TrackSummary
 from position_inference.semantics.personnel import (
+    get_fixed_positions,
+    get_personnel_bounds,
     get_superset_canonical_slots,
 )
 
@@ -19,18 +21,23 @@ def solve_global_assignments(
     direction: str = "left",
     view: str = "sideline",
     personnel_priors: Optional[Dict[str, int]] = None,
+    solver_pass: int = 1,
 ) -> List[PositionAssignment]:
     """
     Global constrained optimization solver for football player position assignments.
-    Implements a genuine OR-Tools CP-SAT model jointly optimizing track-to-slot assignment,
-    5-OL lateral ordering, WR/CB depth alignment, defense levels, and formation legality (11 offense + 11 defense).
+    Implements a genuine OR-Tools CP-SAT model supporting:
+    - Variable offensive personnel (6 fixed + 5 solver-chosen skill roles from config)
+    - Variable defensive personnel (11 solver-chosen roles from config bounds)
+    - Strict 5-OL lateral ordering (LT > LG > C > RG > RT)
+    - WR/CB wing depth coverage constraints
+    - Defense level ordering (Front -> LB -> Safety)
+    - Paired fusion priors (Pass 2 re-solve guidance)
+    - Diagnostic assignment margins and alternative role tracking
     """
     model = cp_model.CpModel()
     start_time = time.time()
 
     all_tracks = sorted(list(set(offense_track_ids + defense_track_ids)))
-    off_seeds = {center_track_id, qb_track_id} - {None}
-
     off_slots = get_superset_canonical_slots("offense")
     def_slots = get_superset_canonical_slots("defense")
     all_slots = off_slots + def_slots
@@ -90,32 +97,33 @@ def solve_global_assignments(
         track_vars = [x[(t, s)] for t in all_tracks if (t, s) in x]
         model.Add(sum(track_vars) + is_nv[s] == is_active[s])
 
-    # 3. Offense Formation Constraints
-    # Fixed offense slots for standard package: 5 OL, QB, 1 RB, 1 TE, 3 WR
-    fixed_off_slots = [
-        "offense.C_1", "offense.LT_1", "offense.LG_1", "offense.RG_1", "offense.RT_1", "offense.QB_1",
-        "offense.RB_1", "offense.TE_1", "offense.WR_1", "offense.WR_2", "offense.WR_3"
-    ]
+    # 3. Flexible Offensive Formation Constraints
+    fixed_off_dict = get_fixed_positions("offense")
+    fixed_off_slots = [f"offense.{pos}_1" for pos in fixed_off_dict.keys()]
     for s in fixed_off_slots:
-        model.Add(is_active[s] == 1)
+        if s in is_active:
+            model.Add(is_active[s] == 1)
 
-    # Exactly 11 total active offense players
+    # Exactly 11 total active offense players (6 fixed + 5 skill)
     model.Add(sum(is_active[s] for s in off_slots) == 11)
 
-    # Skill bounds hierarchy
-    for prefix, max_count in [("offense.WR", 5), ("offense.TE", 3), ("offense.RB", 2), ("offense.FB", 1)]:
-        for idx in range(2, max_count + 1):
-            curr_slot = f"{prefix}_{idx}"
-            prev_slot = f"{prefix}_{idx - 1}"
-            if curr_slot in is_active and prev_slot in is_active:
-                model.Add(is_active[curr_slot] <= is_active[prev_slot])
+    skill_slots = [s for s in off_slots if s not in fixed_off_slots]
+    model.Add(sum(is_active[s] for s in skill_slots) == 5)
 
-    # Personnel priors from paired fusion if available
-    if personnel_priors:
-        for pos, count in personnel_priors.items():
-            pos_slots = [s for s in off_slots if f"offense.{pos}_" in s]
-            if pos_slots and count <= len(pos_slots):
-                model.Add(sum(is_active[s] for s in pos_slots) == count)
+    off_bounds = get_personnel_bounds("offense")
+    for pos in ("RB", "FB", "TE", "WR"):
+        pos_slots = [s for s in skill_slots if f"offense.{pos}_" in s]
+        b = off_bounds.get(pos, {"min": 0, "max": len(pos_slots)})
+        model.Add(sum(is_active[s] for s in pos_slots) >= b["min"])
+        model.Add(sum(is_active[s] for s in pos_slots) <= b["max"])
+
+    # Skill bounds slot activation hierarchy
+    for pos in ("WR", "TE", "RB"):
+        pos_slots = [s for s in skill_slots if f"offense.{pos}_" in s]
+        for idx in range(1, len(pos_slots)):
+            curr_slot = pos_slots[idx]
+            prev_slot = pos_slots[idx - 1]
+            model.Add(is_active[curr_slot] <= is_active[prev_slot])
 
     # 4. 5-OL Offensive Lateral Ordering
     # In offensive perspective: LT > LG > C > RG > RT
@@ -167,33 +175,40 @@ def solve_global_assignments(
     if qb_track_id and (qb_track_id, "offense.QB_1") in x:
         model.Add(x[(qb_track_id, "offense.QB_1")] == 1)
 
-    # 7. Defense Formation Constraints
+    # 7. Flexible Defensive Formation Constraints
     # Exactly 11 total active defense players
     model.Add(sum(is_active[s] for s in def_slots) == 11)
 
-    # Defense slot prefix hierarchy
-    for prefix, max_count in [
-        ("defense.DE", 3), ("defense.DT", 4), ("defense.LB", 5), ("defense.CB", 5),
-        ("defense.FS", 1), ("defense.SS", 1)
-    ]:
-        for idx in range(2, max_count + 1):
-            curr_slot = f"{prefix}_{idx}"
-            prev_slot = f"{prefix}_{idx - 1}"
-            if curr_slot in is_active and prev_slot in is_active:
-                model.Add(is_active[curr_slot] <= is_active[prev_slot])
+    def_bounds = get_personnel_bounds("defense")
+    for pos in ("DE", "DT", "LB", "CB", "FS", "SS"):
+        pos_slots = [s for s in def_slots if f"defense.{pos}_" in s]
+        b = def_bounds.get(pos, {"min": 0, "max": len(pos_slots)})
+        model.Add(sum(is_active[s] for s in pos_slots) >= b["min"])
+        model.Add(sum(is_active[s] for s in pos_slots) <= b["max"])
 
-    # Core active positions on defense: 2 DE, 1 DT, 3 LB, 3 CB, 1 FS, 1 SS
-    model.Add(is_active["defense.DE_1"] == 1)
-    model.Add(is_active["defense.DE_2"] == 1)
-    model.Add(is_active["defense.DT_1"] == 1)
-    model.Add(is_active["defense.LB_1"] == 1)
-    model.Add(is_active["defense.LB_2"] == 1)
-    model.Add(is_active["defense.LB_3"] == 1)
-    model.Add(is_active["defense.CB_1"] == 1)
-    model.Add(is_active["defense.CB_2"] == 1)
-    model.Add(is_active["defense.CB_3"] == 1)
-    model.Add(is_active["defense.FS_1"] == 1)
-    model.Add(is_active["defense.SS_1"] == 1)
+    # Defensive structural level bounds (Front 3-5, LB 1-4, DB 4-6)
+    front_slots = [s for s in def_slots if "DE_" in s or "DT_" in s]
+    lb_slots = [s for s in def_slots if "LB_" in s]
+    db_slots = [s for s in def_slots if "CB_" in s or "FS_" in s or "SS_" in s]
+    model.Add(sum(is_active[s] for s in front_slots) >= 3)
+    model.Add(sum(is_active[s] for s in front_slots) <= 5)
+    model.Add(sum(is_active[s] for s in lb_slots) >= 1)
+    model.Add(sum(is_active[s] for s in lb_slots) <= 4)
+    model.Add(sum(is_active[s] for s in db_slots) >= 4)
+    model.Add(sum(is_active[s] for s in db_slots) <= 6)
+
+    # Safeties: at least 1 safety in secondary
+    safety_slots = [s for s in def_slots if "FS_" in s or "SS_" in s]
+    model.Add(sum(is_active[s] for s in safety_slots) >= 1)
+    model.Add(sum(is_active[s] for s in safety_slots) <= 2)
+
+    # Defense slot hierarchy
+    for pos in ("DE", "DT", "LB", "CB"):
+        pos_slots = [s for s in def_slots if f"defense.{pos}_" in s]
+        for idx in range(1, len(pos_slots)):
+            curr_slot = pos_slots[idx]
+            prev_slot = pos_slots[idx - 1]
+            model.Add(is_active[curr_slot] <= is_active[prev_slot])
 
     # Defense Level Ordering:
     # Front line (DE, DT) is closer to LOS than LB
@@ -210,7 +225,6 @@ def solve_global_assignments(
             d2 = spatial_features.get(t2, {}).get("depth_los", 0.0)
 
             # Front vs LB: only apply between interior linemen and middle linebackers
-            # because outside linebackers (OLB/SLB) frequently walk up onto the line of scrimmage
             lat1 = abs(spatial_features.get(t1, {}).get("lateral_offense", 0.0))
             lat2 = abs(spatial_features.get(t2, {}).get("lateral_offense", 0.0))
             if lat1 <= 1.3 and lat2 <= 1.3 and d1 > d2 + 0.8:
@@ -229,45 +243,67 @@ def solve_global_assignments(
     # 8. Objective Function
     obj_terms = []
 
+    # Term A: Candidate assignment scores
     for (t, s), var in x.items():
         pos = s.split(".")[1].split("_")[0]
-        t_scores = candidate_scores.get(t, {})
-        base_score = t_scores.get(pos, 0.20)
-
-        # Action anchor bonus
-        is_hard = (s == "offense.C_1" and t == center_track_id) or (s == "offense.QB_1" and t == qb_track_id)
-        if is_hard:
-            base_score = 2.0
-
-        int_score = int(round(base_score * 1000))
+        score = candidate_scores.get(t, {}).get(pos, 0.0)
+        # Scale to integer for CP-SAT
+        int_score = int(score * 1000)
         obj_terms.append(int_score * var)
 
+    # Term B: Penalty for missing/out-of-view active slots
     for s in all_slots:
-        obj_terms.append(50 * is_active[s])
-        obj_terms.append(-80 * is_nv[s])
+        if s.startswith("offense.") and any(s.startswith(f"offense.{p}_") for p in ("C", "LT", "LG", "RG", "RT", "QB")):
+            obj_terms.append(-350 * is_nv[s])
+        else:
+            obj_terms.append(-150 * is_nv[s])
 
-    for t in all_tracks:
-        obj_terms.append(-10 * is_unassigned[t])
+    # Term C: Minor penalty for unassigned tracks to encourage legal player usage
+    for t, var in is_unassigned.items():
+        obj_terms.append(-50 * var)
+
+    # Term D: Personnel priors encouragement (Pass 2 paired guidance)
+    if personnel_priors:
+        for pos, target_count in personnel_priors.items():
+            pos_slots = [s for s in all_slots if f".{pos}_" in s]
+            if pos_slots:
+                # Add reward for each active slot up to target count
+                for idx, slot in enumerate(pos_slots, start=1):
+                    if idx <= target_count:
+                        obj_terms.append(120 * is_active[slot])
+                    else:
+                        obj_terms.append(-120 * is_active[slot])
 
     model.Maximize(sum(obj_terms))
 
-    # 9. Solve with CP-SAT
+    # 9. Solve Model
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 5.0
     solver.parameters.num_search_workers = 1
+    solver.parameters.max_time_in_seconds = 10.0
 
     solve_status = solver.Solve(model)
-    solve_duration = time.time() - start_time
 
     assignments: List[PositionAssignment] = []
-
     if solve_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for s in all_slots:
-            if solver.Value(is_active[s]) == 0:
-                continue
-
+            active_val = solver.Value(is_active[s])
             side = "offense" if s.startswith("offense.") else "defense"
             pos = s.split(".")[1].split("_")[0]
+
+            if active_val == 0:
+                # Slot is inactive in the selected formation package
+                assignments.append(
+                    PositionAssignment(
+                        slot_id=s,
+                        side=side,
+                        position=pos,
+                        track_id=None,
+                        visibility="unknown",
+                        confidence=0.0,
+                        slot_state="INACTIVE_SLOT",
+                    )
+                )
+                continue
 
             assigned_track = None
             for t in all_tracks:
@@ -276,11 +312,45 @@ def solve_global_assignments(
                     break
 
             if assigned_track is not None:
-                score = candidate_scores.get(assigned_track, {}).get(pos, 0.85)
+                assigned_score = candidate_scores.get(assigned_track, {}).get(pos, 0.85)
+
+                # Find legal alternative positions for this track on the same side
+                t_scores = candidate_scores.get(assigned_track, {})
+                legal_positions = (
+                    {"C", "LT", "LG", "RG", "RT", "QB", "RB", "FB", "TE", "WR"}
+                    if side == "offense"
+                    else {"DE", "DT", "LB", "CB", "FS", "SS"}
+                )
+                alt_positions = [
+                    (p, sc) for p, sc in t_scores.items() if p != pos and p in legal_positions and sc > 0.0
+                ]
+                alt_positions.sort(key=lambda item: item[1], reverse=True)
+                alt_pos = alt_positions[0][0] if alt_positions else None
+                alt_score = alt_positions[0][1] if alt_positions else 0.0
+
+                # Also check competing tracks for this slot from the same team
+                team_tracks = off_set if side == "offense" else def_set
+                competing_scores = [
+                    candidate_scores.get(other_t, {}).get(pos, 0.0)
+                    for other_t in team_tracks
+                    if other_t != assigned_track and (other_t, s) in x
+                ]
+                max_competing = max(competing_scores) if competing_scores else 0.0
+                best_alternative_score = max(alt_score, max_competing)
+                score_margin = max(0.0, assigned_score - best_alternative_score)
+
+                # Calibrated confidence calculation based on margin & anchor status
                 is_anchor = (s == "offense.C_1" and assigned_track == center_track_id) or (
                     s == "offense.QB_1" and assigned_track == qb_track_id
                 )
-                conf = 0.99 if is_anchor else max(0.70, min(0.95, score))
+                if is_anchor:
+                    conf = 0.99
+                elif score_margin >= 0.35:
+                    conf = min(0.96, assigned_score + 0.08 * score_margin)
+                elif score_margin < 0.10:
+                    conf = max(0.40, assigned_score - 0.25 * (0.10 - score_margin))
+                else:
+                    conf = min(0.90, assigned_score)
 
                 assignments.append(
                     PositionAssignment(
@@ -291,10 +361,33 @@ def solve_global_assignments(
                         visibility="visible",
                         confidence=float(conf),
                         slot_state="ACTIVE_VISIBLE",
-                        evidence={"evidence_score": float(score), "cpsat_objective": float(solver.ObjectiveValue())},
+                        assigned_score=float(assigned_score),
+                        best_alternative_score=float(best_alternative_score),
+                        score_margin=float(score_margin),
+                        alternative_position=alt_pos,
+                        evidence={
+                            "evidence_score": float(assigned_score),
+                            "score_margin": float(score_margin),
+                            "cpsat_objective": float(solver.ObjectiveValue()),
+                        },
                     )
                 )
             else:
+                # Active slot without visible track (ACTIVE_NOT_VISIBLE)
+                # Confidence derived from priors & view type
+                is_endzone = (view == "endzone")
+                is_wide_skill = pos in ("WR", "CB")
+                prior_supported = bool(personnel_priors and personnel_priors.get(pos, 0) > 0)
+
+                if prior_supported and is_endzone and is_wide_skill:
+                    nv_conf = 0.85  # Highly expected out of view in endzone
+                elif is_endzone and is_wide_skill:
+                    nv_conf = 0.78
+                elif prior_supported:
+                    nv_conf = 0.75
+                else:
+                    nv_conf = 0.60
+
                 assignments.append(
                     PositionAssignment(
                         slot_id=s,
@@ -302,9 +395,9 @@ def solve_global_assignments(
                         position=pos,
                         track_id=None,
                         visibility="out_of_view",
-                        confidence=0.80,
+                        confidence=float(nv_conf),
                         slot_state="ACTIVE_NOT_VISIBLE",
-                        evidence={"missing_canonical_slot": 1.0},
+                        evidence={"missing_canonical_slot": 1.0, "prior_supported": 1.0 if prior_supported else 0.0},
                     )
                 )
     else:

@@ -61,9 +61,8 @@ def test_jetsweep_1_golden_inference(tmp_path):
     assert assigned_by_pos.get("SS") == {11}, "SS must be track 11"
 
     # 4. Infer Endzone clip and fuse
-    from position_inference.data.schemas import VideoMetadata
-    e_meta = VideoMetadata(video_id="JetSweep_2", dataset_order=2, view_raw="endzone")
-    e_result = infer_video_positions(mot_path_e, actions_path, video_id="JetSweep_2", video_metadata=e_meta)
+    ds_path = FIXTURE_DIR / "dataset_summary.csv"
+    e_result = infer_video_positions(mot_path_e, actions_path, video_id="JetSweep_2", dataset_summary=ds_path)
     assert e_result.video_id == "JetSweep_2"
     assert e_result.view == "endzone"
 

@@ -13,7 +13,7 @@ from position_inference.data.schemas import (
 from position_inference.data.mot_loader import load_mot_detections
 from position_inference.data.action_loader import load_action_annotations
 from position_inference.data.playertrack_loader import load_ground_truth_roles
-from position_inference.data.dataset_summary import load_dataset_summary
+from position_inference.data.dataset_summary import load_dataset_summary, resolve_video_metadata
 from position_inference.data.discovery import discover_video_artifacts
 
 __all__ = [
@@ -31,5 +31,6 @@ __all__ = [
     "load_action_annotations",
     "load_ground_truth_roles",
     "load_dataset_summary",
+    "resolve_video_metadata",
     "discover_video_artifacts",
 ]

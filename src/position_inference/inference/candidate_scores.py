@@ -74,12 +74,12 @@ def compute_candidate_role_scores(
         geom_scores["DT"] = 1.0 if (-0.2 <= depth_los <= 1.2 and abs_lat <= 0.5) else 0.15
 
         # LB: second level interior or walked-up outside linebacker
-        is_second_level = (1.5 <= depth_los <= 3.8 and abs_lat <= 1.6)
+        is_second_level = (1.9 <= depth_los <= 3.8 and abs_lat <= 1.6)
         is_outside_lb = (0.4 <= depth_los <= 2.5 and 1.4 <= abs_lat <= 2.4)
         geom_scores["LB"] = 1.0 if (is_second_level or is_outside_lb) else 0.15
 
-        # CB: wide cornerbacks
-        geom_scores["CB"] = 1.0 if (depth_los >= -0.3 and abs_lat >= 2.2) else 0.15
+        # CB: wide cornerbacks (closer to line of scrimmage than deep safeties)
+        geom_scores["CB"] = 1.0 if (-0.3 <= depth_los <= 3.8 and abs_lat >= 2.0) else (0.4 if abs_lat >= 2.0 else 0.15)
 
         # FS vs SS:
         if depth_los >= 2.8:
@@ -98,6 +98,14 @@ def compute_candidate_role_scores(
         combined_scores: Dict[str, float] = {}
 
         all_roles = set(geom_scores.keys()) | set(a_score.keys()) | set(l_prob.keys())
+        active_w_action = w_action if any(sc > 0.0 for sc in a_score.values()) else 0.0
+        active_w_model = w_model if (l_prob and any(sc > 0.0 for sc in l_prob.values())) else 0.0
+        active_w_geom = w_geom
+
+        total_w = active_w_action + active_w_geom + active_w_model
+        if total_w <= 0.0:
+            total_w = 1.0
+
         for r in all_roles:
             sc_a = a_score.get(r, 0.0)
             sc_g = geom_scores.get(r, 0.0)
@@ -106,7 +114,8 @@ def compute_candidate_role_scores(
             if sc_a >= 0.99:
                 comb = 1.0
             else:
-                comb = w_action * sc_a + w_geom * sc_g + w_model * sc_m
+                raw_comb = active_w_action * sc_a + active_w_geom * sc_g + active_w_model * sc_m
+                comb = min(1.0, max(0.0, raw_comb / total_w))
 
             combined_scores[r] = float(comb)
 

@@ -31,3 +31,8 @@ def get_pairing_config() -> Dict[str, Any]:
 
 def get_confidence_config() -> Dict[str, Any]:
     return load_yaml_config("confidence.yaml")
+
+
+def get_personnel_constraints() -> Dict[str, Any]:
+    return load_yaml_config("personnel_constraints.yaml")
+

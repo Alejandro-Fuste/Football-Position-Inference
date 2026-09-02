@@ -1,33 +1,74 @@
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
+from position_inference.config import get_personnel_constraints
 from position_inference.data.schemas import PositionAssignment
 
-SUPERSET_OFFENSE_SLOTS = [
-    "offense.C_1", "offense.LT_1", "offense.LG_1", "offense.RG_1", "offense.RT_1", "offense.QB_1",
-    "offense.RB_1", "offense.RB_2",
-    "offense.FB_1",
-    "offense.TE_1", "offense.TE_2", "offense.TE_3",
-    "offense.WR_1", "offense.WR_2", "offense.WR_3", "offense.WR_4", "offense.WR_5",
-]
 
-SUPERSET_DEFENSE_SLOTS = [
-    "defense.DE_1", "defense.DE_2", "defense.DE_3",
-    "defense.DT_1", "defense.DT_2", "defense.DT_3", "defense.DT_4",
-    "defense.LB_1", "defense.LB_2", "defense.LB_3", "defense.LB_4", "defense.LB_5",
-    "defense.CB_1", "defense.CB_2", "defense.CB_3", "defense.CB_4", "defense.CB_5",
-    "defense.FS_1",
-    "defense.SS_1",
-]
+def get_personnel_bounds(side: str) -> Dict[str, Dict[str, int]]:
+    """
+    Returns min/max count constraints for positions on a given side from configuration.
+    """
+    cfg = get_personnel_constraints()
+    if side == "offense":
+        off_cfg = cfg.get("offense", {})
+        bounds = {}
+        # Fixed positions have min=max=fixed count
+        for pos, count in off_cfg.get("fixed_positions", {}).items():
+            bounds[pos] = {"min": count, "max": count}
+        for pos, b in off_cfg.get("skill_bounds", {}).items():
+            bounds[pos] = {"min": b.get("min", 0), "max": b.get("max", 5)}
+        return bounds
+    else:
+        def_cfg = cfg.get("defense", {})
+        bounds = {}
+        for pos, b in def_cfg.get("bounds", {}).items():
+            bounds[pos] = {"min": b.get("min", 0), "max": b.get("max", 5)}
+        return bounds
+
+
+def get_fixed_positions(side: str) -> Dict[str, int]:
+    """Returns mapping of guaranteed fixed positions (e.g. 5 OL + QB for offense)."""
+    cfg = get_personnel_constraints()
+    if side == "offense":
+        return dict(cfg.get("offense", {}).get("fixed_positions", {}))
+    return {}
 
 
 def get_superset_canonical_slots(side: str) -> List[str]:
-    """Returns all potential canonical slot IDs for a given side."""
-    return list(SUPERSET_OFFENSE_SLOTS) if side == "offense" else list(SUPERSET_DEFENSE_SLOTS)
+    """
+    Returns all potential canonical slot IDs for a given side,
+    dynamically derived from the maximum bounds in personnel_constraints.yaml.
+    """
+    cfg = get_personnel_constraints()
+    slots: List[str] = []
+
+    if side == "offense":
+        off_cfg = cfg.get("offense", {})
+        # Guaranteed fixed positions
+        for pos in ("C", "LT", "LG", "RG", "RT", "QB"):
+            slots.append(f"offense.{pos}_1")
+        # Skill positions up to configured max
+        skill_bounds = off_cfg.get("skill_bounds", {})
+        for pos in ("RB", "FB", "TE", "WR"):
+            b = skill_bounds.get(pos, {})
+            max_c = b.get("max", 2 if pos == "RB" else 1 if pos == "FB" else 3 if pos == "TE" else 5)
+            for idx in range(1, max_c + 1):
+                slots.append(f"offense.{pos}_{idx}")
+    else:
+        def_cfg = cfg.get("defense", {})
+        def_bounds = def_cfg.get("bounds", {})
+        for pos in ("DE", "DT", "LB", "CB", "FS", "SS"):
+            b = def_bounds.get(pos, {})
+            max_c = b.get("max", 3 if pos == "DE" else 4 if pos == "DT" else 5 if pos in ("LB", "CB") else 1)
+            for idx in range(1, max_c + 1):
+                slots.append(f"defense.{pos}_{idx}")
+
+    return slots
 
 
 def get_canonical_slots(side: str, personnel_name: str = "11") -> List[str]:
     """
-    Returns full list of 11 canonical slot IDs for Offense or Defense given package name.
+    Returns list of 11 canonical slot IDs for Offense or Defense given package name.
     """
     if side == "offense":
         if personnel_name == "12":  # 1 RB, 2 TE, 2 WR
@@ -64,23 +105,10 @@ def get_canonical_slots(side: str, personnel_name: str = "11") -> List[str]:
         ]
 
 
-def get_canonical_slots_from_counts(side: str, position_counts: Dict[str, int]) -> List[str]:
-    """
-    Builds exact list of active canonical slot IDs from position counts.
-    E.g. {"C": 1, "LT": 1, "LG": 1, "RG": 1, "RT": 1, "QB": 1, "RB": 1, "TE": 1, "WR": 3}
-    -> ['offense.C_1', ..., 'offense.WR_3']
-    """
-    slots = []
-    prefix = f"{side}."
-    for pos, count in sorted(position_counts.items()):
-        for idx in range(1, count + 1):
-            slots.append(f"{prefix}{pos}_{idx}")
-    return slots
-
-
 def extract_personnel_hypothesis(assignments: List[PositionAssignment]) -> Dict[str, int]:
     """
     Counts active positions (both visible and not_visible) from assignments.
+    Excludes INACTIVE_SLOT.
     """
     counts: Dict[str, int] = {}
     for a in assignments:

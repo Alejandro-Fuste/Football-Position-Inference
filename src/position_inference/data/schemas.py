@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,10 @@ class PositionAssignment:
     visibility: Literal["visible", "occluded_or_sparse", "out_of_view", "unknown"]
     confidence: float
     slot_state: Literal["ACTIVE_VISIBLE", "ACTIVE_NOT_VISIBLE", "INACTIVE_SLOT"] = "ACTIVE_VISIBLE"
+    assigned_score: float = 0.0
+    best_alternative_score: float = 0.0
+    score_margin: float = 0.0
+    alternative_position: Optional[str] = None
     alternatives: List[Tuple[str, float]] = field(default_factory=list)
     evidence: Dict[str, float] = field(default_factory=dict)
     flags: List[str] = field(default_factory=list)
@@ -122,6 +126,13 @@ class ViewInferenceResult:
     rejected_track_ids: List[int] = field(default_factory=list)
     suspected_id_switches: List[Dict[str, float]] = field(default_factory=list)
     personnel_hypothesis: Dict[str, int] = field(default_factory=dict)
+    preliminary_personnel_hypothesis: Optional[Dict[str, int]] = None
+    paired_personnel_prior: Optional[Dict[str, int]] = None
+    confidence_calibrated: bool = False
+    solver_pass: int = 1
     confidence: float = 1.0
     status: str = "AUTO_ACCEPTED"
     warnings: List[str] = field(default_factory=list)
+    metadata_source: Optional[str] = None
+    pair_resolution_margin: float = 0.0
+    pair_diagnostics: Dict[str, Any] = field(default_factory=dict)

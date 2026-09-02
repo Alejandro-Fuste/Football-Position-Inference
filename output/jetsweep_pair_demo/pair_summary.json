@@ -1,0 +1,102 @@
+{
+  "pair_id": "JetSweep_1_JetSweep_2",
+  "sideline_video_id": "JetSweep_1",
+  "endzone_video_id": "JetSweep_2",
+  "sideline_view": "sideline",
+  "endzone_view": "endzone",
+  "preliminary_sideline_personnel": {
+    "C": 1,
+    "LT": 1,
+    "LG": 1,
+    "RG": 1,
+    "RT": 1,
+    "QB": 1,
+    "RB": 1,
+    "TE": 1,
+    "WR": 3,
+    "DE": 2,
+    "DT": 1,
+    "LB": 3,
+    "CB": 3,
+    "FS": 1,
+    "SS": 1
+  },
+  "preliminary_endzone_personnel": {
+    "C": 1,
+    "LT": 1,
+    "LG": 1,
+    "RG": 1,
+    "RT": 1,
+    "QB": 1,
+    "WR": 5,
+    "DE": 1,
+    "DT": 3,
+    "LB": 1,
+    "CB": 5,
+    "SS": 1
+  },
+  "shared_personnel_prior": {
+    "WR": 3,
+    "TE": 1,
+    "RB": 1,
+    "FB": 0,
+    "CB": 3,
+    "FS": 1,
+    "SS": 1,
+    "DE": 1,
+    "DT": 3,
+    "LB": 1
+  },
+  "final_sideline_personnel": {
+    "C": 1,
+    "LT": 1,
+    "LG": 1,
+    "RG": 1,
+    "RT": 1,
+    "QB": 1,
+    "RB": 1,
+    "TE": 1,
+    "WR": 3,
+    "DE": 2,
+    "DT": 1,
+    "LB": 3,
+    "CB": 3,
+    "FS": 1,
+    "SS": 1
+  },
+  "final_endzone_personnel": {
+    "C": 1,
+    "LT": 1,
+    "LG": 1,
+    "RG": 1,
+    "RT": 1,
+    "QB": 1,
+    "RB": 1,
+    "TE": 1,
+    "WR": 3,
+    "DE": 1,
+    "DT": 3,
+    "LB": 1,
+    "CB": 4,
+    "FS": 1,
+    "SS": 1
+  },
+  "pair_resolution_margin": 0.019844246662428566,
+  "pair_status": "PAIR_REVIEW_REQUIRED",
+  "pair_warnings": [
+    "Ambiguous personnel disagreement across paired views (diff: 0.020 < threshold 0.12). Manual review required."
+  ],
+  "confidence_calibrated": false,
+  "pass_1_diagnostics": {
+    "sideline_status": "REVIEW_RECOMMENDED",
+    "endzone_status": "REVIEW_RECOMMENDED",
+    "sideline_confidence": 0.23942148760330584,
+    "endzone_confidence": 0.2592657342657344
+  },
+  "pass_2_diagnostics": {
+    "sideline_status": "PAIR_REVIEW_REQUIRED",
+    "endzone_status": "PAIR_REVIEW_REQUIRED",
+    "sideline_confidence": 0.23942148760330584,
+    "endzone_confidence": 0.2633566433566433
+  }
+}

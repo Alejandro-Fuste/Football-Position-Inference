@@ -10,7 +10,11 @@ def write_review_report_markdown(
     pair_id: str = "pair_0001",
 ):
     """
-    Generates a Markdown human-review report with auditable evidence sections.
+    Generates an auditable Markdown human-review report with:
+    - Input metadata and view provenance
+    - Personnel hypotheses (preliminary, shared prior, final)
+    - Assignment ambiguity, competing alternatives, and score margins
+    - Pairing diagnostics & calibration status
     """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -21,10 +25,16 @@ def write_review_report_markdown(
     lines.append("")
     lines.append(f"- **Pair ID:** {pair_id}")
     lines.append(f"- **Video ID:** {result.video_id}")
-    lines.append(f"- **View:** {result.view} (Confidence: {result.view_confidence:.2%})")
-    lines.append(f"- **Offensive Direction:** {result.offense_direction} (Confidence: {result.offense_direction_confidence:.2%})")
+    lines.append(f"- **View:** `{result.view}` (Confidence: {result.view_confidence:.2%})")
+    lines.append(f"- **View Source:** `{'metadata' if result.metadata_source else 'geometric_inference'}`")
+    if result.metadata_source:
+        lines.append(f"- **Metadata Source:** `{result.metadata_source}`")
+    lines.append(f"- **Offensive Direction:** `{result.offense_direction}` (Confidence: {result.offense_direction_confidence:.2%})")
+    lines.append(f"- **Solver Pass:** Pass {result.solver_pass}")
     lines.append(f"- **Overall Confidence:** {result.confidence:.2%}")
     lines.append(f"- **Status:** `{result.status}`")
+    lines.append(f"- **Confidence Calibrated:** `{'yes' if result.confidence_calibrated else 'no (conservative mode)'}`")
+    lines.append(f"- **Auto-Accept Enabled:** `{'yes' if result.confidence_calibrated else 'no'}`")
     lines.append("")
 
     # Warnings section
@@ -34,28 +44,56 @@ def write_review_report_markdown(
             lines.append(f"- {w}")
         lines.append("")
 
+    # Personnel section
+    lines.append("## Formation Personnel")
+    if result.preliminary_personnel_hypothesis:
+        lines.append(f"- **Preliminary Personnel (Pass 1):** `{result.preliminary_personnel_hypothesis}`")
+    if result.paired_personnel_prior:
+        lines.append(f"- **Shared Paired Prior:** `{result.paired_personnel_prior}`")
+    lines.append(f"- **Final Active Personnel:** `{result.personnel_hypothesis}`")
+    if result.pair_resolution_margin > 0.0:
+        lines.append(f"- **Pair Resolution Margin:** `{result.pair_resolution_margin:.4f}`")
+    lines.append("")
+
     # Offense assignments
     lines.append("## Offense Assignments")
-    lines.append("| Slot ID | Position | Track ID | Visibility | Confidence | Evidence Breakdown |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("| Slot ID | Position | Track ID | State | Assigned | Alt Pos | Alt Score | Margin | Confidence | Evidence |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for a in result.assignments:
-        if a.side == "offense":
+        if a.side == "offense" and a.slot_state != "INACTIVE_SLOT":
             ev_str = ", ".join([f"{k}: {v:.2f}" for k, v in a.evidence.items()])
-            lines.append(f"| `{a.slot_id}` | `{a.position}` | `{a.track_id_display}` | `{a.visibility}` | {a.confidence:.2%} | {ev_str} |")
+            alt_pos_str = a.alternative_position or "-"
+            lines.append(
+                f"| `{a.slot_id}` | `{a.position}` | `{a.track_id_display}` | `{a.slot_state}` | "
+                f"{a.assigned_score:.2f} | `{alt_pos_str}` | {a.best_alternative_score:.2f} | "
+                f"{a.score_margin:.2f} | {a.confidence:.2%} | {ev_str} |"
+            )
     lines.append("")
 
     # Defense assignments
     lines.append("## Defense Assignments")
-    lines.append("| Slot ID | Position | Track ID | Visibility | Confidence | Evidence Breakdown |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("| Slot ID | Position | Track ID | State | Assigned | Alt Pos | Alt Score | Margin | Confidence | Evidence |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for a in result.assignments:
-        if a.side == "defense":
+        if a.side == "defense" and a.slot_state != "INACTIVE_SLOT":
             ev_str = ", ".join([f"{k}: {v:.2f}" for k, v in a.evidence.items()])
-            lines.append(f"| `{a.slot_id}` | `{a.position}` | `{a.track_id_display}` | `{a.visibility}` | {a.confidence:.2%} | {ev_str} |")
+            alt_pos_str = a.alternative_position or "-"
+            lines.append(
+                f"| `{a.slot_id}` | `{a.position}` | `{a.track_id_display}` | `{a.slot_state}` | "
+                f"{a.assigned_score:.2f} | `{alt_pos_str}` | {a.best_alternative_score:.2f} | "
+                f"{a.score_margin:.2f} | {a.confidence:.2%} | {ev_str} |"
+            )
     lines.append("")
 
+    # Inactive slots
+    inactive_slots = [a.slot_id for a in result.assignments if a.slot_state == "INACTIVE_SLOT"]
+    if inactive_slots:
+        lines.append(f"## Inactive Package Slots ({len(inactive_slots)})")
+        lines.append(f"- `{', '.join(inactive_slots)}`")
+        lines.append("")
+
     # Not Visible slots
-    not_vis = [a for a in result.assignments if a.visibility == "out_of_view"]
+    not_vis = [a for a in result.assignments if a.slot_state == "ACTIVE_NOT_VISIBLE"]
     lines.append(f"## Out of View / `not_visible` Slots ({len(not_vis)})")
     if not_vis:
         for a in not_vis:

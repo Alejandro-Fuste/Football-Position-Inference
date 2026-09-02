@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -8,6 +9,7 @@ from position_inference.data import (
     ViewInferenceResult,
     load_action_annotations,
     load_mot_detections,
+    resolve_video_metadata,
 )
 from position_inference.data.action_loader import filter_actions_for_video
 from position_inference.geometry import (
@@ -29,7 +31,10 @@ from position_inference.quality import (
     evaluate_player_validity,
     summarize_tracks,
 )
-from position_inference.semantics import extract_semantic_anchors, get_canonical_slots
+from position_inference.semantics import extract_semantic_anchors
+from position_inference.semantics.personnel import extract_personnel_hypothesis
+
+logger = logging.getLogger(__name__)
 
 
 def infer_video_positions(
@@ -37,15 +42,18 @@ def infer_video_positions(
     action_source: Optional[Union[str, Path]] = None,
     video_id: str = "video_001",
     video_metadata: Optional[VideoMetadata] = None,
+    dataset_summary: Optional[Union[str, Path, Dict[str, VideoMetadata]]] = None,
     learned_model=None,
     allow_missing_actions: bool = False,
+    personnel_priors: Optional[Dict[str, int]] = None,
+    solver_pass: int = 1,
 ) -> ViewInferenceResult:
     """
     Main single-video position inference pipeline.
     Executes end-to-end V1 structured inference flow in the corrected order:
     1. Load MOT & summarize tracks
     2. Compute preliminary geometry
-    3. Classify camera view (with metadata & preliminary geometry)
+    3. Resolve VideoMetadata from DatasetSummary & classify camera view
     4. Load & match video-specific KeyActions safely
     5. Evaluate track validity & filter noise
     6. Identify snap frame & compute pre-snap stable window
@@ -54,9 +62,26 @@ def infer_video_positions(
     9. Compute normalized spatial features in offensive perspective
     10. Partition teams into offense/defense
     11. Candidate role probability scoring
-    12. Global CP-SAT constrained optimization solver
+    12. Global CP-SAT constrained optimization solver (flexible personnel)
     13. Calibrate confidence and evaluate review triggers
     """
+    hard_warnings: List[str] = []
+    meta_src = None
+
+    # Resolve VideoMetadata from DatasetSummary if not already provided
+    if video_metadata is None:
+        if dataset_summary is not None:
+            video_metadata = resolve_video_metadata(dataset_summary, video_id)
+            meta_src = str(dataset_summary)
+            if video_metadata is None:
+                hard_warnings.append("dataset_summary_video_not_found")
+        else:
+            default_summary_path = Path("data/dataset_summary/DatasetSummary.csv")
+            if default_summary_path.exists():
+                video_metadata = resolve_video_metadata(default_summary_path, video_id)
+                if video_metadata is not None:
+                    meta_src = str(default_summary_path)
+
     # 1. Load MOT detections & summarize tracks
     detections = load_mot_detections(mot_source)
     track_summaries = summarize_tracks(detections)
@@ -64,12 +89,11 @@ def infer_video_positions(
     # 2. Compute preliminary geometry (before view classification and snap detection)
     compute_preliminary_footpoints(track_summaries)
 
-    # 3. Classify camera view (sideline, endzone, or unknown)
+    # 3. Classify camera view (prioritizing metadata view when present)
     view_pred = classify_view(track_summaries, video_metadata)
 
     # 4. Load Key Actions annotations safely (no unsafe fallback)
     actions: List[ActionAnnotation] = []
-    hard_warnings: List[str] = []
     if action_source:
         all_actions = load_action_annotations(action_source)
         actions = filter_actions_for_video(
@@ -130,7 +154,7 @@ def infer_video_positions(
         learned_model=learned_model,
     )
 
-    # 13. Global CP-SAT constrained optimization solver
+    # 13. Global CP-SAT constrained optimization solver (flexible personnel)
     all_assignments = solve_global_assignments(
         track_summaries,
         spatial_feats,
@@ -141,7 +165,12 @@ def infer_video_positions(
         qb_track_id=qb_tid,
         direction=dir_pred.direction,
         view=view_pred.view,
+        personnel_priors=personnel_priors,
+        solver_pass=solver_pass,
     )
+
+    # 14. Extract active personnel counts
+    personnel_hyp = extract_personnel_hypothesis(all_assignments)
 
     # Construct result object
     result = ViewInferenceResult(
@@ -153,10 +182,13 @@ def infer_video_positions(
         assignments=all_assignments,
         rejected_track_ids=rejected_tids,
         suspected_id_switches=id_switches,
+        personnel_hypothesis=personnel_hyp,
+        solver_pass=solver_pass,
+        metadata_source=meta_src,
         status="AUTO_ACCEPTED",
     )
 
-    # 14. Evaluate result confidence & hard review triggers
+    # 15. Evaluate result confidence & hard review triggers
     result = evaluate_result_confidence(result, hard_warnings=hard_warnings)
 
     return result

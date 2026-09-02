@@ -22,8 +22,8 @@ def write_playertrack_csv(
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    offense_assignments = [a for a in result.assignments if a.side == "offense"]
-    defense_assignments = [a for a in result.assignments if a.side == "defense"]
+    offense_assignments = [a for a in result.assignments if a.side == "offense" and a.slot_state != "INACTIVE_SLOT"]
+    defense_assignments = [a for a in result.assignments if a.side == "defense" and a.slot_state != "INACTIVE_SLOT"]
 
     off_cells = [f"{a.position},{a.track_id_display}" for a in offense_assignments]
     def_cells = [f"{a.position},{a.track_id_display}" for a in defense_assignments]
