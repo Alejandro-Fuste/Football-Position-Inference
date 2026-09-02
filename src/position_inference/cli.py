@@ -78,18 +78,25 @@ def main():
 
     elif args.command == "infer-pair":
         out_dir = Path(args.output_dir)
-        s_result = infer_video_positions(args.sideline_mot, args.actions, video_id=args.sideline_id)
-        e_result = infer_video_positions(args.endzone_mot, args.actions, video_id=args.endzone_id)
+        from position_inference.data.schemas import VideoMetadata
+
+        s_meta = VideoMetadata(video_id=args.sideline_id, dataset_order=1, view_raw="sideline")
+        e_meta = VideoMetadata(video_id=args.endzone_id, dataset_order=2, view_raw="endzone")
+
+        s_result = infer_video_positions(args.sideline_mot, args.actions, video_id=args.sideline_id, video_metadata=s_meta)
+        e_result = infer_video_positions(args.endzone_mot, args.actions, video_id=args.endzone_id, video_metadata=e_meta)
 
         s_fused, e_fused, warnings = fuse_paired_views(s_result, e_result)
 
-        write_playertrack_csv(s_fused, out_dir / f"{args.sideline_id}_playertrack.csv")
-        write_inference_json(s_fused, out_dir / f"{args.sideline_id}_inference.json")
-        write_review_report_markdown(s_fused, out_dir / f"{args.sideline_id}_review.md")
+        pair_name = f"{args.sideline_id}_{args.endzone_id}"
 
-        write_playertrack_csv(e_fused, out_dir / f"{args.endzone_id}_playertrack.csv")
+        write_playertrack_csv(s_fused, out_dir / f"{args.sideline_id}_playertrack.csv", video_number=args.sideline_id)
+        write_inference_json(s_fused, out_dir / f"{args.sideline_id}_inference.json")
+        write_review_report_markdown(s_fused, out_dir / f"{args.sideline_id}_review.md", pair_id=pair_name)
+
+        write_playertrack_csv(e_fused, out_dir / f"{args.endzone_id}_playertrack.csv", video_number=args.endzone_id)
         write_inference_json(e_fused, out_dir / f"{args.endzone_id}_inference.json")
-        write_review_report_markdown(e_fused, out_dir / f"{args.endzone_id}_review.md")
+        write_review_report_markdown(e_fused, out_dir / f"{args.endzone_id}_review.md", pair_id=pair_name)
 
         print(f"Paired inference complete for {args.sideline_id} and {args.endzone_id}. Outputs written to {out_dir}")
 

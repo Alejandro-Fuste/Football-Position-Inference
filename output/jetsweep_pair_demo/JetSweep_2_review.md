@@ -1,44 +1,49 @@
 # Position Inference Review Report — JetSweep_2
 
-- **Pair ID:** pair_0001
+- **Pair ID:** JetSweep_1_JetSweep_2
 - **Video ID:** JetSweep_2
-- **View:** sideline (Confidence: 55.00%)
+- **View:** endzone (Confidence: 98.00%)
 - **Offensive Direction:** down (Confidence: 92.00%)
-- **Overall Confidence:** 87.81%
+- **Overall Confidence:** 73.62%
 - **Status:** `REVIEW_RECOMMENDED`
 
 ## Offense Assignments
 | Slot ID | Position | Track ID | Visibility | Confidence | Evidence Breakdown |
 |---|---|---|---|---|---|
-| `offense.C_1` | `C` | `13` | `visible` | 99.00% | action_anchor: 1.00 |
-| `offense.QB_1` | `QB` | `11` | `visible` | 99.00% | action_anchor: 1.00 |
-| `offense.LG_1` | `LG` | `9` | `visible` | 86.00% | ol_line_sequence: 0.86 |
-| `offense.LT_1` | `LT` | `15` | `visible` | 86.00% | ol_line_sequence: 0.86 |
-| `offense.RG_1` | `RG` | `20` | `visible` | 86.00% | ol_line_sequence: 0.86 |
-| `offense.RT_1` | `RT` | `22` | `visible` | 86.00% | ol_line_sequence: 0.86 |
-| `offense.TE_1` | `TE` | `18` | `visible` | 85.00% | inline_alignment: 0.85 |
-| `offense.RB_1` | `RB` | `17` | `visible` | 85.00% | backfield_depth: 0.85 |
-| `offense.WR_1` | `WR` | `5` | `visible` | 86.00% | action_motion_anchor: 0.86 |
-| `offense.WR_2` | `WR` | `10` | `visible` | 86.00% | action_motion_anchor: 0.86 |
-| `offense.WR_3` | `WR` | `37` | `visible` | 86.00% | action_motion_anchor: 0.86 |
+| `offense.C_1` | `C` | `13` | `visible` | 99.00% | evidence_score: 1.00, cpsat_objective: 7942.00 |
+| `offense.LT_1` | `LT` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
+| `offense.LG_1` | `LG` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
+| `offense.RG_1` | `RG` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
+| `offense.RT_1` | `RT` | `9` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `offense.QB_1` | `QB` | `11` | `visible` | 99.00% | evidence_score: 1.00, cpsat_objective: 7942.00 |
+| `offense.RB_1` | `RB` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
+| `offense.TE_1` | `TE` | `7` | `visible` | 70.00% | evidence_score: 0.28, cpsat_objective: 7942.00 |
+| `offense.WR_1` | `WR` | `5` | `visible` | 70.00% | evidence_score: 0.61, cpsat_objective: 7942.00 |
+| `offense.WR_2` | `WR` | `15` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `offense.WR_3` | `WR` | `17` | `visible` | 70.00% | evidence_score: 0.60, cpsat_objective: 7942.00 |
 
 ## Defense Assignments
 | Slot ID | Position | Track ID | Visibility | Confidence | Evidence Breakdown |
 |---|---|---|---|---|---|
-| `defense.DT_1` | `DT` | `23` | `visible` | 88.00% | interior_defensive_line: 0.88 |
-| `defense.DT_2` | `DT` | `31` | `visible` | 88.00% | interior_defensive_line: 0.88 |
-| `defense.DE_1` | `DE` | `7` | `visible` | 88.00% | edge_defensive_line: 0.88 |
-| `defense.DE_2` | `DE` | `8` | `visible` | 88.00% | edge_defensive_line: 0.88 |
-| `defense.LB_1` | `LB` | `30` | `visible` | 88.00% | second_level_lb: 0.88 |
-| `defense.LB_2` | `LB` | `1` | `visible` | 88.00% | second_level_lb: 0.88 |
-| `defense.CB_1` | `CB` | `6` | `visible` | 88.00% | wide_cb_alignment: 0.88 |
-| `defense.CB_2` | `CB` | `29` | `visible` | 88.00% | wide_cb_alignment: 0.88 |
-| `defense.FS_1` | `FS` | `4` | `visible` | 85.00% | deep_safety_alignment: 0.85 |
-| `defense.SS_1` | `SS` | `2` | `visible` | 85.00% | deep_safety_alignment: 0.85 |
-| `defense.CB_3` | `CB` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00 |
+| `defense.DE_1` | `DE` | `16` | `visible` | 70.00% | evidence_score: 0.04, cpsat_objective: 7942.00 |
+| `defense.DE_2` | `DE` | `14` | `visible` | 70.00% | evidence_score: 0.04, cpsat_objective: 7942.00 |
+| `defense.DT_1` | `DT` | `12` | `visible` | 70.00% | evidence_score: 0.04, cpsat_objective: 7942.00 |
+| `defense.LB_1` | `LB` | `3` | `visible` | 70.00% | evidence_score: 0.04, cpsat_objective: 7942.00 |
+| `defense.LB_2` | `LB` | `8` | `visible` | 70.00% | evidence_score: 0.04, cpsat_objective: 7942.00 |
+| `defense.LB_3` | `LB` | `4` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `defense.CB_1` | `CB` | `6` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `defense.CB_2` | `CB` | `2` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `defense.CB_3` | `CB` | `1` | `visible` | 70.00% | evidence_score: 0.30, cpsat_objective: 7942.00 |
+| `defense.FS_1` | `FS` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
+| `defense.SS_1` | `SS` | `not_visible` | `out_of_view` | 80.00% | missing_canonical_slot: 1.00, sideline_confirmed_slot: 0.70 |
 
-## Out of View / `not_visible` Slots (1)
-- `defense.CB_3` (CB): {'missing_canonical_slot': 1.0}
+## Out of View / `not_visible` Slots (6)
+- `offense.LT_1` (LT): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
+- `offense.LG_1` (LG): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
+- `offense.RG_1` (RG): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
+- `offense.RB_1` (RB): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
+- `defense.FS_1` (FS): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
+- `defense.SS_1` (SS): {'missing_canonical_slot': 1.0, 'sideline_confirmed_slot': 0.7}
 
 ## Rejected / Noise Tracks (0)
 - None

@@ -266,6 +266,56 @@ def build_power_fixture(data_root: Path, fixtures_root: Path):
     print(f"  ✓ Preserved {nv_count} NOT_VISIBLE (NV) roles.")
 
 
+def build_jetsweep_fixture_3_4(data_root: Path, fixtures_root: Path):
+    dest_dir = fixtures_root / "jetsweep_pair_003_004"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nBuilding JetSweep (Pair 2: 003/004) fixture -> {dest_dir}...")
+
+    # 1. PlayerTrack
+    pt_src = data_root / "player_tracks" / "JetSweep.csv"
+    pt_dst = dest_dir / "player_tracks.csv"
+    extract_csv_rows_by_video_ids(pt_src, pt_dst, ["3", "4"], "JetSweep_")
+
+    # 2. KeyActions
+    ka_src = data_root / "key_actions" / "JetSweep.csv"
+    ka_dst = dest_dir / "key_actions.csv"
+    extract_csv_rows_by_video_ids(ka_src, ka_dst, ["3", "4"], "JetSweep_")
+
+    # 3. DatasetSummary
+    ds_src = data_root / "dataset_summary" / "DatasetSummary.csv"
+    ds_dst = dest_dir / "dataset_summary.csv"
+    extract_dataset_summary_rows(ds_src, ds_dst, ["JetSweep_3", "JetSweep_4"])
+
+    # 4. MOT files
+    mot3_src = data_root / "tracking" / "JetSweep" / "JetSweep_3_cvat_mot.zip"
+    mot4_src = data_root / "tracking" / "JetSweep" / "JetSweep_4_cvat_mot.zip"
+    if mot3_src.exists():
+        shutil.copy2(mot3_src, dest_dir / "JetSweep_3_cvat_mot.zip")
+    if mot4_src.exists():
+        shutil.copy2(mot4_src, dest_dir / "JetSweep_4_cvat_mot.zip")
+
+    # 5. Expected JSON
+    roles = load_ground_truth_roles(pt_dst)
+    expected_data = build_expected_json(
+        roles=roles,
+        video_ids=["JetSweep_3", "JetSweep_4"],
+        views={"JetSweep_3": "sideline", "JetSweep_4": "endzone"},
+        pair_id="jetsweep_pair_003_004",
+        provenance={
+            "play_type": "JetSweep",
+            "source_videos": ["JetSweep_3", "JetSweep_4"],
+            "mot_files": ["JetSweep_3_cvat_mot.zip", "JetSweep_4_cvat_mot.zip"],
+            "version": "1.0",
+        },
+    )
+
+    with open(dest_dir / "expected.json", "w", encoding="utf-8") as f:
+        json.dump(expected_data, f, indent=2)
+
+    print(f"  ✓ JetSweep (003/004) fixture created with {len(roles)} ground-truth entries.")
+
+
 def main():
     data_root = REPO_ROOT / "data"
     fixtures_root = REPO_ROOT / "tests" / "fixtures"
@@ -277,6 +327,7 @@ def main():
     print("=" * 60)
 
     build_jetsweep_fixture(data_root, fixtures_root)
+    build_jetsweep_fixture_3_4(data_root, fixtures_root)
     build_power_fixture(data_root, fixtures_root)
 
     print("\nFixture build complete!")
