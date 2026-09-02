@@ -1,23 +1,31 @@
 BallSnap:
   aliases: ["Ball Snap", "Action_BallSnap", "Snap"]
+  side:
+    offense: 1.0
   roles:
     C: 1.0
   mode: hard_anchor
 
 SnapReceive:
   aliases: ["Snap Receive", "Action_SnapReceive", "Receive Snap"]
+  side:
+    offense: 1.0
   roles:
     QB: 1.0
   mode: hard_anchor
 
 Toss:
   aliases: ["Toss", "Action_Toss", "Pitch"]
+  side:
+    offense: 1.0
   roles:
     QB: 0.95
   mode: strong
 
 JetMotion:
   aliases: ["Jet Motion", "Action_JetMotion", "Motion"]
+  side:
+    offense: 1.0
   roles:
     WR: 0.90
     TE: 0.10
@@ -26,21 +34,47 @@ JetMotion:
 BallCarry_JetSweep:
   play: JetSweep
   aliases: ["Ball Carry", "Action_BallCarry", "Carry"]
+  side:
+    offense: 1.0
   roles:
     WR: 0.85
     RB: 0.15
   mode: play_conditioned
 
+BallCarry_General:
+  aliases: ["Ball Carry", "Action_BallCarry", "Carry"]
+  side:
+    offense: 1.0
+  roles:
+    RB: 0.70
+    WR: 0.15
+    QB: 0.15
+  mode: play_conditioned
+
 LeadBlock:
   aliases: ["Lead Block", "Action_LeadBlock"]
+  side:
+    offense: 1.0
   roles:
     TE: 0.45
     FB: 0.35
     OL: 0.20
   mode: soft
 
+SealBlock:
+  aliases: ["Seal Block", "Action_SealBlock"]
+  side:
+    offense: 1.0
+  roles:
+    TE: 0.45
+    OL: 0.40
+    FB: 0.15
+  mode: soft
+
 BlockSecondLevel:
   aliases: ["Block Second Level", "Action_BlockSecondLevel", "Second Level Block"]
+  side:
+    offense: 1.0
   roles:
     OL: 0.60
     TE: 0.40
@@ -48,10 +82,79 @@ BlockSecondLevel:
 
 ZoneBlock:
   aliases: ["Zone Block", "Action_ZoneBlock", "End of OL Block"]
+  side:
+    offense: 1.0
   roles:
     LT: 0.20
     LG: 0.20
     C: 0.20
     RG: 0.20
     RT: 0.20
+  mode: soft
+
+SackQuarterback:
+  aliases: ["Sack Quarterback", "Action_Sack", "Sack"]
+  side:
+    defense: 1.0
+  roles:
+    DE: 0.35
+    DT: 0.25
+    LB: 0.30
+    CB: 0.05
+    SS: 0.05
+  mode: soft
+
+CloseOnQuarterback:
+  aliases: ["Close On Quarterback", "Pressure", "Hurries"]
+  side:
+    defense: 1.0
+  roles:
+    DE: 0.40
+    DT: 0.25
+    LB: 0.30
+    CB: 0.05
+  mode: soft
+
+WrapQuarterback:
+  aliases: ["Wrap Quarterback"]
+  side:
+    defense: 1.0
+  roles:
+    DE: 0.40
+    DT: 0.30
+    LB: 0.30
+  mode: soft
+
+Tackle:
+  aliases: ["Tackle", "Solo Tackle", "Assist Tackle"]
+  side:
+    defense: 0.90
+    offense: 0.10
+  roles:
+    LB: 0.40
+    SAF: 0.25
+    CB: 0.20
+    DE: 0.10
+    DT: 0.05
+  mode: soft
+
+PassBreakup:
+  aliases: ["Pass Breakup", "PBU", "Defend Pass"]
+  side:
+    defense: 1.0
+  roles:
+    CB: 0.50
+    FS: 0.25
+    SS: 0.15
+    LB: 0.10
+  mode: soft
+
+BlockKick:
+  aliases: ["Block Kick", "Attempt Block"]
+  side:
+    defense: 1.0
+  roles:
+    DE: 0.35
+    DT: 0.35
+    LB: 0.30
   mode: soft

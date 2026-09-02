@@ -9,17 +9,20 @@ def evaluate_predictions(
 ) -> Dict[str, float]:
     """
     Computes position inference evaluation metrics against labeled ground truth.
+    Supports allowed_predictions (e.g. SAF -> [FS, SS]) and set-based evaluation.
     """
     if not ground_truth:
         return {}
 
     # Build GT map by position / track_id
     gt_by_track: Dict[int, str] = {}
+    gt_allowed: Dict[int, List[str]] = {}
     gt_by_pos: Dict[str, Set[int]] = {}
 
     for gt in ground_truth:
         if gt.track_id is not None:
             gt_by_track[gt.track_id] = gt.position
+            gt_allowed[gt.track_id] = gt.allowed_predictions or [gt.position]
             gt_by_pos.setdefault(gt.position, set()).add(gt.track_id)
 
     total_vis = 0
@@ -47,8 +50,9 @@ def evaluate_predictions(
         if a.track_id is not None and a.visibility == "visible":
             total_vis += 1
             expected_pos = gt_by_track.get(a.track_id)
+            allowed = gt_allowed.get(a.track_id, [expected_pos] if expected_pos else [])
 
-            is_correct = (expected_pos == a.position)
+            is_correct = (a.position in allowed)
             if is_correct:
                 correct_vis += 1
 

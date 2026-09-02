@@ -1,13 +1,16 @@
+import os
 from pathlib import Path
 import pytest
 
 from position_inference.data import load_action_annotations, ActionAnnotation
 
-DATA_DIR = Path("/Users/alejandro/Desktop/Projects/FilmBreakdownAI/Utilities/Combine_Tracks_and_Actions/data")
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "jetsweep_pair_001_002"
+ENV_DATA = os.environ.get("POSITION_INFERENCE_TEST_DATA")
+DATA_DIR = Path(ENV_DATA) if ENV_DATA else FIXTURES_DIR
 
 
 def test_load_action_annotations():
-    actions_csv = DATA_DIR / "key_actions" / "JetSweep.csv"
+    actions_csv = DATA_DIR / "key_actions.csv"
     if not actions_csv.exists():
         pytest.skip("KeyActions CSV missing")
 

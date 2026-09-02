@@ -1,0 +1,314 @@
+{
+  "pair_id": "power_pair_001_002",
+  "provenance": {
+    "play_type": "Power",
+    "source_videos": [
+      "Power_1",
+      "Power_2"
+    ],
+    "mot_files": [
+      "Power_1_cvat_mot.zip",
+      "Power_2_cvat_mot.zip"
+    ],
+    "missing_inputs": [
+      "key_actions/Power.csv"
+    ],
+    "version": "1.0"
+  },
+  "videos": {
+    "Power_1": {
+      "expected_view": "sideline",
+      "offense": [
+        {
+          "source_label": "QB",
+          "normalized_position": "QB",
+          "track_state": "VISIBLE",
+          "track_id": 18
+        },
+        {
+          "source_label": "RB",
+          "normalized_position": "RB",
+          "track_state": "VISIBLE",
+          "track_id": 20
+        },
+        {
+          "source_label": "HB",
+          "normalized_position": "RB",
+          "track_state": "VISIBLE",
+          "track_id": 3
+        },
+        {
+          "source_label": "WR1",
+          "normalized_position": "WR",
+          "track_state": "VISIBLE",
+          "track_id": 4
+        },
+        {
+          "source_label": "WR2",
+          "normalized_position": "WR",
+          "track_state": "VISIBLE",
+          "track_id": 5
+        },
+        {
+          "source_label": "WR3",
+          "normalized_position": "WR",
+          "track_state": "VISIBLE",
+          "track_id": 2
+        },
+        {
+          "source_label": "LT",
+          "normalized_position": "LT",
+          "track_state": "VISIBLE",
+          "track_id": 23
+        },
+        {
+          "source_label": "LG",
+          "normalized_position": "LG",
+          "track_state": "VISIBLE",
+          "track_id": 17
+        },
+        {
+          "source_label": "C",
+          "normalized_position": "C",
+          "track_state": "VISIBLE",
+          "track_id": 22
+        },
+        {
+          "source_label": "RG",
+          "normalized_position": "RG",
+          "track_state": "VISIBLE",
+          "track_id": 19
+        },
+        {
+          "source_label": "RT",
+          "normalized_position": "RT",
+          "track_state": "VISIBLE",
+          "track_id": 13
+        }
+      ],
+      "defense": [
+        {
+          "source_label": "DE1",
+          "normalized_position": "DE",
+          "track_state": "VISIBLE",
+          "track_id": 14
+        },
+        {
+          "source_label": "DT",
+          "normalized_position": "DT",
+          "track_state": "VISIBLE",
+          "track_id": 15
+        },
+        {
+          "source_label": "DE2",
+          "normalized_position": "DE",
+          "track_state": "VISIBLE",
+          "track_id": 7
+        },
+        {
+          "source_label": "OLB",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 12
+        },
+        {
+          "source_label": "LB1",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 11
+        },
+        {
+          "source_label": "LB2",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 16
+        },
+        {
+          "source_label": "SAF",
+          "normalized_position": "SAF",
+          "track_state": "VISIBLE",
+          "track_id": 6,
+          "allowed_predictions": [
+            "FS",
+            "SS"
+          ]
+        },
+        {
+          "source_label": "CB1",
+          "normalized_position": "CB",
+          "track_state": "VISIBLE",
+          "track_id": 21
+        },
+        {
+          "source_label": "CB2",
+          "normalized_position": "CB",
+          "track_state": "VISIBLE",
+          "track_id": 10
+        },
+        {
+          "source_label": "CB3",
+          "normalized_position": "CB",
+          "track_state": "VISIBLE",
+          "track_id": 8
+        },
+        {
+          "source_label": "SAF",
+          "normalized_position": "SAF",
+          "track_state": "VISIBLE",
+          "track_id": 9,
+          "allowed_predictions": [
+            "FS",
+            "SS"
+          ]
+        }
+      ]
+    },
+    "Power_2": {
+      "expected_view": "endzone",
+      "offense": [
+        {
+          "source_label": "QB",
+          "normalized_position": "QB",
+          "track_state": "VISIBLE",
+          "track_id": 0
+        },
+        {
+          "source_label": "RB",
+          "normalized_position": "RB",
+          "track_state": "VISIBLE",
+          "track_id": 16
+        },
+        {
+          "source_label": "HB",
+          "normalized_position": "RB",
+          "track_state": "VISIBLE",
+          "track_id": 14
+        },
+        {
+          "source_label": "WR1",
+          "normalized_position": "WR",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "WR2",
+          "normalized_position": "WR",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "WR3",
+          "normalized_position": "WR",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "LT",
+          "normalized_position": "LT",
+          "track_state": "VISIBLE",
+          "track_id": 15
+        },
+        {
+          "source_label": "LG",
+          "normalized_position": "LG",
+          "track_state": "VISIBLE",
+          "track_id": 23
+        },
+        {
+          "source_label": "C",
+          "normalized_position": "C",
+          "track_state": "VISIBLE",
+          "track_id": 22
+        },
+        {
+          "source_label": "RG",
+          "normalized_position": "RG",
+          "track_state": "VISIBLE",
+          "track_id": 18
+        },
+        {
+          "source_label": "RT",
+          "normalized_position": "RT",
+          "track_state": "VISIBLE",
+          "track_id": 17
+        }
+      ],
+      "defense": [
+        {
+          "source_label": "DE1",
+          "normalized_position": "DE",
+          "track_state": "VISIBLE",
+          "track_id": 20
+        },
+        {
+          "source_label": "DT",
+          "normalized_position": "DT",
+          "track_state": "VISIBLE",
+          "track_id": 22
+        },
+        {
+          "source_label": "DE2",
+          "normalized_position": "DE",
+          "track_state": "VISIBLE",
+          "track_id": 9
+        },
+        {
+          "source_label": "OLB",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 12
+        },
+        {
+          "source_label": "LB1",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 21
+        },
+        {
+          "source_label": "LB2",
+          "normalized_position": "LB",
+          "track_state": "VISIBLE",
+          "track_id": 13
+        },
+        {
+          "source_label": "SAF",
+          "normalized_position": "SAF",
+          "track_state": "VISIBLE",
+          "track_id": 25,
+          "allowed_predictions": [
+            "FS",
+            "SS"
+          ]
+        },
+        {
+          "source_label": "CB1",
+          "normalized_position": "CB",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "CB2",
+          "normalized_position": "CB",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "CB3",
+          "normalized_position": "CB",
+          "track_state": "NOT_VISIBLE",
+          "track_id": null
+        },
+        {
+          "source_label": "SAF",
+          "normalized_position": "SAF",
+          "track_state": "VISIBLE",
+          "track_id": 27,
+          "allowed_predictions": [
+            "FS",
+            "SS"
+          ]
+        }
+      ]
+    }
+  }
+}

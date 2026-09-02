@@ -1,13 +1,16 @@
+import os
 from pathlib import Path
 import pytest
 
 from position_inference.data import load_ground_truth_roles, GroundTruthRole
 
-DATA_DIR = Path("/Users/alejandro/Desktop/Projects/FilmBreakdownAI/Utilities/Combine_Tracks_and_Actions/data")
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "jetsweep_pair_001_002"
+ENV_DATA = os.environ.get("POSITION_INFERENCE_TEST_DATA")
+DATA_DIR = Path(ENV_DATA) if ENV_DATA else FIXTURES_DIR
 
 
 def test_load_ground_truth_roles():
-    gt_csv = DATA_DIR / "player_tracks" / "JetSweep.csv"
+    gt_csv = DATA_DIR / "player_tracks.csv"
     if not gt_csv.exists():
         pytest.skip("PlayerTrack CSV missing")
 
@@ -20,6 +23,8 @@ def test_load_ground_truth_roles():
 
     c_role = next(g for g in js1_roles if g.position == "C")
     assert c_role.track_id == 7
+    assert c_role.track_state == "VISIBLE"
 
     qb_role = next(g for g in js1_roles if g.position == "QB")
     assert qb_role.track_id == 17
+    assert qb_role.track_state == "VISIBLE"

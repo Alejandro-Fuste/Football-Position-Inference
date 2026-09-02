@@ -9,7 +9,9 @@ from position_inference.data import (
     load_action_annotations,
     load_mot_detections,
 )
+from position_inference.data.action_loader import filter_actions_for_video
 from position_inference.geometry import (
+    compute_preliminary_footpoints,
     compute_spatial_features,
     extract_presnap_footpoints,
     identify_snap_frame,
@@ -17,7 +19,6 @@ from position_inference.geometry import (
     partition_teams,
 )
 from position_inference.inference import (
-    complete_missing_slots,
     compute_candidate_role_scores,
     evaluate_result_confidence,
     solve_global_assignments,
@@ -37,42 +38,62 @@ def infer_video_positions(
     video_id: str = "video_001",
     video_metadata: Optional[VideoMetadata] = None,
     learned_model=None,
+    allow_missing_actions: bool = False,
 ) -> ViewInferenceResult:
     """
     Main single-video position inference pipeline.
-    Executes end-to-end V1 structured inference flow.
+    Executes end-to-end V1 structured inference flow in the corrected order:
+    1. Load MOT & summarize tracks
+    2. Compute preliminary geometry
+    3. Classify camera view (with metadata & preliminary geometry)
+    4. Load & match video-specific KeyActions safely
+    5. Evaluate track validity & filter noise
+    6. Identify snap frame & compute pre-snap stable window
+    7. Extract action semantic anchors & side evidence
+    8. Infer view-relative offensive direction
+    9. Compute normalized spatial features in offensive perspective
+    10. Partition teams into offense/defense
+    11. Candidate role probability scoring
+    12. Global CP-SAT constrained optimization solver
+    13. Calibrate confidence and evaluate review triggers
     """
-    # 1. Load MOT detections
+    # 1. Load MOT detections & summarize tracks
     detections = load_mot_detections(mot_source)
-
-    # 2. Separate player tracks & summarize statistics
     track_summaries = summarize_tracks(detections)
 
-    # 3. Load Key Actions annotations if provided
-    actions: List[ActionAnnotation] = []
-    if action_source:
-        all_actions = load_action_annotations(action_source)
-        actions = [a for a in all_actions if a.video_id == video_id or a.video_id.endswith(video_id)]
-        if not actions and all_actions:
+    # 2. Compute preliminary geometry (before view classification and snap detection)
+    compute_preliminary_footpoints(track_summaries)
 
-            actions = all_actions
-
-    # 4. Evaluate track validity & filter non-player false positives
-    track_summaries, rejected_tids = evaluate_player_validity(track_summaries, actions)
-
-    # 5. Detect suspected ID switches
-    id_switches = detect_id_switches(track_summaries)
-
-    # 6. Classify camera view (sideline vs endzone)
+    # 3. Classify camera view (sideline, endzone, or unknown)
     view_pred = classify_view(track_summaries, video_metadata)
 
-    # 7. Identify snap frame & extract pre-snap median footpoints
+    # 4. Load Key Actions annotations safely (no unsafe fallback)
+    actions: List[ActionAnnotation] = []
+    hard_warnings: List[str] = []
+    if action_source:
+        all_actions = load_action_annotations(action_source)
+        actions = filter_actions_for_video(
+            all_actions,
+            video_id=video_id,
+            action_source=action_source,
+            allow_missing_actions=allow_missing_actions,
+        )
+        if not actions and allow_missing_actions:
+            hard_warnings.append("missing_action_annotations")
+
+    # 5. Evaluate track validity & filter non-player false positives
+    track_summaries, rejected_tids = evaluate_player_validity(track_summaries, actions)
+
+    # 6. Detect suspected ID switches
+    id_switches = detect_id_switches(track_summaries)
+
+    # 7. Identify snap frame & extract pre-snap stable window
     snap_frame = identify_snap_frame(actions)
     extract_presnap_footpoints(track_summaries, snap_frame)
 
-    # 8. Extract action semantic anchors (Ball Snap -> C, Snap Receive -> QB)
+    # 8. Extract action semantic anchors and side evidence
     play_type = video_metadata.play_type if video_metadata else None
-    center_tid, qb_tid, action_role_scores = extract_semantic_anchors(actions, play_type)
+    center_tid, qb_tid, action_role_scores, track_side_scores = extract_semantic_anchors(actions, play_type)
 
     # 9. Infer view-relative offensive direction
     dir_pred = infer_offensive_direction(
@@ -82,7 +103,7 @@ def infer_video_positions(
         view=view_pred.view,
     )
 
-    # 10. Compute Center-relative spatial features
+    # 10. Compute normalized spatial features in offensive perspective
     spatial_feats = compute_spatial_features(
         track_summaries,
         center_track_id=center_tid,
@@ -94,6 +115,7 @@ def infer_video_positions(
     off_tids, def_tids = partition_teams(
         track_summaries,
         action_annotations=actions,
+        track_side_scores=track_side_scores,
         center_track_id=center_tid,
         qb_track_id=qb_tid,
         direction=dir_pred.direction,
@@ -108,8 +130,8 @@ def infer_video_positions(
         learned_model=learned_model,
     )
 
-    # 13. Global assignment solver
-    raw_assignments = solve_global_assignments(
+    # 13. Global CP-SAT constrained optimization solver
+    all_assignments = solve_global_assignments(
         track_summaries,
         spatial_feats,
         cand_scores,
@@ -120,18 +142,6 @@ def infer_video_positions(
         direction=dir_pred.direction,
         view=view_pred.view,
     )
-
-    # 14. Ensure complete canonical slots (fill missing slots with not_visible)
-    expected_off = get_canonical_slots("offense")
-    expected_def = get_canonical_slots("defense")
-
-    off_assigned = [a for a in raw_assignments if a.side == "offense"]
-    def_assigned = [a for a in raw_assignments if a.side == "defense"]
-
-    off_completed = complete_missing_slots(off_assigned, expected_off, "offense")
-    def_completed = complete_missing_slots(def_assigned, expected_def, "defense")
-
-    all_assignments = off_completed + def_completed
 
     # Construct result object
     result = ViewInferenceResult(
@@ -146,7 +156,7 @@ def infer_video_positions(
         status="AUTO_ACCEPTED",
     )
 
-    # 15. Evaluate result confidence & hard review triggers
-    result = evaluate_result_confidence(result)
+    # 14. Evaluate result confidence & hard review triggers
+    result = evaluate_result_confidence(result, hard_warnings=hard_warnings)
 
     return result

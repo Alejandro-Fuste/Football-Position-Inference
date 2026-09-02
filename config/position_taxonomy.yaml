@@ -53,12 +53,33 @@ groups:
   SKILL_OFFENSE: ["QB", "RB", "FB", "WR", "TE"]
 
 position_aliases:
+  WR1: WR
+  WR2: WR
+  WR3: WR
+  WR4: WR
+  WR5: WR
+  TE1: TE
+  TE2: TE
+  HB: RB
   RCB: CB
   LCB: CB
+  CB1: CB
+  CB2: CB
+  CB3: CB
+  CB4: CB
   SLB: LB
   MLB: LB
   WLB: LB
+  OLB: LB
+  LB1: LB
+  LB2: LB
   LDE: DE
   RDE: DE
+  DE1: DE
+  DE2: DE
+  DT1: DT
+  DT2: DT
   DT-1: DT
-  SAF: FS
+  SAF: SAF
+  SAF1: SAF
+  SAF2: SAF

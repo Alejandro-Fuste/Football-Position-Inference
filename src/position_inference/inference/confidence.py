@@ -10,6 +10,7 @@ def evaluate_result_confidence(
 ) -> ViewInferenceResult:
     """
     Evaluates overall video inference confidence and determines final status.
+    Uses assignment score margin, anchor presence, view/direction confidence, and hard review triggers.
     """
     if hard_warnings is None:
         hard_warnings = []
@@ -32,6 +33,8 @@ def evaluate_result_confidence(
         hard_warnings.append("Missing Center track assignment")
     if not has_qb:
         hard_warnings.append("Missing QB track assignment")
+    if result.view == "unknown" or result.view_confidence < 0.60:
+        hard_warnings.append("Unresolved camera view confidence")
     if result.offense_direction_confidence < 0.60:
         hard_warnings.append("Unresolved offensive direction confidence")
 

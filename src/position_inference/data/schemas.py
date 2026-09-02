@@ -17,7 +17,10 @@ class GroundTruthRole:
     video_id: str
     side: Literal["offense", "defense"]
     position: str
-    track_id: Optional[int]
+    track_id: Optional[int] = None
+    source_label: str = ""
+    track_state: Literal["VISIBLE", "NOT_VISIBLE", "UNKNOWN_GROUND_TRUTH"] = "VISIBLE"
+    allowed_predictions: Optional[List[str]] = None
     source_row: int = 0
 
 
@@ -65,8 +68,6 @@ class TrackSummary:
 @dataclass
 class RoleEvidence:
     track_id: int
-    side_probabilities: Dict[str, float] = field(default_factory=dict)
-    role_probabilities: Dict[str, float] = field(default_factory=dict)
     action_scores: Dict[str, float] = field(default_factory=dict)
     geometry_scores: Dict[str, float] = field(default_factory=dict)
     learned_scores: Dict[str, float] = field(default_factory=dict)
@@ -82,6 +83,7 @@ class PositionAssignment:
     track_id: Optional[int]
     visibility: Literal["visible", "occluded_or_sparse", "out_of_view", "unknown"]
     confidence: float
+    slot_state: Literal["ACTIVE_VISIBLE", "ACTIVE_NOT_VISIBLE", "INACTIVE_SLOT"] = "ACTIVE_VISIBLE"
     alternatives: List[Tuple[str, float]] = field(default_factory=list)
     evidence: Dict[str, float] = field(default_factory=dict)
     flags: List[str] = field(default_factory=list)
@@ -89,7 +91,7 @@ class PositionAssignment:
 
     def __post_init__(self):
         if not self.track_id_display:
-            if self.track_id is None or self.visibility == "out_of_view":
+            if self.track_id is None or self.visibility == "out_of_view" or self.slot_state == "ACTIVE_NOT_VISIBLE":
                 object.__setattr__(self, "track_id_display", "not_visible")
             else:
                 object.__setattr__(self, "track_id_display", str(self.track_id))

@@ -7,18 +7,33 @@ from position_inference.geometry.spatial_features import compute_spatial_feature
 def partition_teams(
     track_summaries: Dict[int, TrackSummary],
     action_annotations: List[ActionAnnotation] = None,
+    track_side_scores: Optional[Dict[int, Dict[str, float]]] = None,
     center_track_id: Optional[int] = None,
     qb_track_id: Optional[int] = None,
     direction: str = "left",
 ) -> Tuple[List[int], List[int]]:
     """
     Partitions valid player tracks into Offense and Defense candidate pools.
-    Uses seed action anchors and spatial formation clustering around Center/LOS.
+    Borderline trench tracks without hard offense seeds are made available to defense
+    so the joint optimizer can decide their role.
     """
     if action_annotations is None:
         action_annotations = []
+    if track_side_scores is None:
+        track_side_scores = {}
 
-    player_tids = [tid for tid, t in track_summaries.items() if t.label == "player" and t.validity_score >= 0.30]
+    player_tids = [
+        tid
+        for tid, t in track_summaries.items()
+        if t.label == "player" and getattr(t, "validity_score", 1.0) >= 0.30
+    ]
+
+    spatial_feats = compute_spatial_features(
+        track_summaries,
+        center_track_id=center_track_id,
+        qb_track_id=qb_track_id,
+        direction=direction,
+    )
 
     offense_seeds: Set[int] = set()
     defense_seeds: Set[int] = set()
@@ -28,55 +43,74 @@ def partition_teams(
     if qb_track_id and qb_track_id in player_tids:
         offense_seeds.add(qb_track_id)
 
-    # Add all actor_track_ids referenced in Key Actions to offense seeds
+    # 1. Action side seeds
     for act in action_annotations:
-        if act.actor_track_id in player_tids:
-            offense_seeds.add(act.actor_track_id)
+        if act.actor_track_id and act.actor_track_id in player_tids:
+            s_scores = track_side_scores.get(act.actor_track_id, {})
+            if s_scores.get("offense", 0.0) >= 0.70:
+                offense_seeds.add(act.actor_track_id)
+            elif s_scores.get("defense", 0.0) >= 0.70:
+                defense_seeds.add(act.actor_track_id)
 
-    spatial_feats = compute_spatial_features(
-        track_summaries,
-        center_track_id=center_track_id,
-        qb_track_id=qb_track_id,
-        direction=direction,
-    )
+    offense_tids: Set[int] = set(offense_seeds)
+    defense_tids: Set[int] = set(defense_seeds)
 
-    # Calculate distance to Center for all tracks
-    center_dists = {tid: spatial_feats.get(tid, {}).get("dist_center", 99.0) for tid in player_tids}
-
-    # Offense includes:
-    # 1. All action seed tracks
-    # 2. Tracks behind LOS (depth_los <= -0.5)
-    # 3. Tracks on LOS within tight lateral cluster around Center (abs(depth_los) <= 1.0 and abs(lateral_offset) <= 3.5)
-    offense_tids: List[int] = list(offense_seeds)
-    defense_tids: List[int] = []
-
+    # 2. Backfield players: clearly on offense side (depth_offense >= 0.5)
     for tid in player_tids:
-        if tid in offense_seeds:
+        if tid in offense_seeds or tid in defense_seeds:
             continue
-
         feat = spatial_feats.get(tid, {})
-        depth = feat.get("depth_los", 0.0)
-        lat = abs(feat.get("lateral_offset", 0.0))
+        depth_off = feat.get("depth_offense", 0.0)
+        abs_lat = abs(feat.get("lateral_offense", 0.0))
 
-        # Offense criteria:
-        if depth <= -0.5:
-            offense_tids.append(tid)
-        elif abs(depth) <= 1.0 and lat <= 3.5:
-            offense_tids.append(tid)
-        else:
-            defense_tids.append(tid)
+        if depth_off >= 0.5:
+            offense_tids.add(tid)
+        elif depth_off <= -1.2 and abs_lat <= 2.0:
+            defense_tids.add(tid)
 
-    # Cap offense at 11 players
-    if len(offense_tids) > 11:
-        # Keep seeds first, then sort remaining by distance to Center/QB
-        non_seed_off = [t for t in offense_tids if t not in offense_seeds]
-        non_seed_off.sort(key=lambda t: center_dists.get(t, 99.0))
+    # 3. Trench players (abs_lat <= 1.4, -0.7 <= depth_off < 0.5)
+    trench_tids = [
+        t for t in player_tids
+        if t not in offense_seeds and t not in defense_seeds
+        and abs(spatial_feats.get(t, {}).get("lateral_offense", 0.0)) <= 1.4
+    ]
+    for tid in trench_tids:
+        feat = spatial_feats.get(tid, {})
+        depth_off = feat.get("depth_offense", 0.0)
+        if depth_off >= -0.65:
+            offense_tids.add(tid)
+        # Trench players on LOS without hard offense seeds are also eligible for defense
+        if depth_off <= 0.3:
+            defense_tids.add(tid)
 
-        keep_count = max(0, 11 - len(offense_seeds))
-        kept_non_seeds = non_seed_off[:keep_count]
-        excess_non_seeds = non_seed_off[keep_count:]
+    # 4. Wing matchups: for wide players (abs_lat > 1.4)
+    left_wing = [
+        t for t in player_tids
+        if spatial_feats.get(t, {}).get("lateral_offense", 0.0) > 1.4
+    ]
+    right_wing = [
+        t for t in player_tids
+        if spatial_feats.get(t, {}).get("lateral_offense", 0.0) < -1.4
+    ]
 
-        offense_tids = list(offense_seeds) + kept_non_seeds
-        defense_tids.extend(excess_non_seeds)
+    for wing in [left_wing, right_wing]:
+        if not wing:
+            continue
+        wing_sorted = sorted(wing, key=lambda t: spatial_feats.get(t, {}).get("depth_offense", -99.0), reverse=True)
+        for rank, tid in enumerate(wing_sorted):
+            if tid in offense_seeds or tid in defense_seeds:
+                continue
+            if rank == 0 or (rank < len(wing_sorted) / 2 and len(offense_tids) < 11):
+                offense_tids.add(tid)
+            else:
+                defense_tids.add(tid)
 
-    return sorted(list(set(offense_tids))), sorted(list(set(defense_tids)))
+    # 5. Any remaining unassigned players go to defense
+    for tid in player_tids:
+        if tid not in offense_tids and tid not in defense_tids:
+            defense_tids.add(tid)
+
+    off_final = sorted(list(offense_tids - defense_seeds))
+    def_final = sorted(list(defense_tids - offense_seeds))
+
+    return off_final, def_final

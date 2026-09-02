@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Tuple
 
 from position_inference.config import get_confidence_config
 from position_inference.data.schemas import PositionAssignment, ViewInferenceResult
+from position_inference.semantics.personnel import extract_personnel_hypothesis
 
 
 def fuse_paired_views(
@@ -10,6 +11,7 @@ def fuse_paired_views(
 ) -> Tuple[ViewInferenceResult, ViewInferenceResult, List[str]]:
     """
     Fuses role and personnel evidence across paired sideline and endzone view results.
+    Sideline provides stronger full-formation evidence; Endzone provides trench/backfield detail.
     Resolves discrepancies using confidence margins or flags for review.
     """
     cfg = get_confidence_config().get("confidence", {})
@@ -17,7 +19,18 @@ def fuse_paired_views(
 
     warnings: List[str] = []
 
-    # Map slot_id to assignment for both views
+    # 1. Extract personnel hypotheses from both views
+    s_hyp = extract_personnel_hypothesis(sideline_result.assignments)
+    e_hyp = extract_personnel_hypothesis(endzone_result.assignments)
+
+    sideline_result.personnel_hypothesis = s_hyp
+    endzone_result.personnel_hypothesis = e_hyp
+
+    # 2. Reconcile personnel package
+    # Sideline typically sees the entire width of the field, so its skill counts (WR/TE/RB) are prioritized
+    shared_personnel = dict(s_hyp) if sideline_result.view_confidence >= endzone_result.view_confidence else dict(e_hyp)
+
+    # 3. Map slot_id to assignment for both views
     s_map = {a.slot_id: a for a in sideline_result.assignments}
     e_map = {a.slot_id: a for a in endzone_result.assignments}
 
@@ -49,6 +62,7 @@ def fuse_paired_views(
 
         # If sideline establishes complete formation but endzone player is out_of_view
         if s_assign.visibility == "visible" and e_assign.visibility == "out_of_view":
+            e_assign.slot_state = "ACTIVE_NOT_VISIBLE"
             e_assign.evidence["sideline_confirmed_slot"] = s_assign.confidence
 
     if warnings:

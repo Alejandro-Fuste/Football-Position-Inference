@@ -14,12 +14,12 @@ In large-scale football film datasets (~4,000 video clips), manual player-positi
 
 Rather than treating position inference as an independent 22-class visual classifier for each track, **V1 uses a hybrid structured-inference architecture**:
 
-1. **Actions Anchor Identities**: Definitions such as `Ball Snap` $\rightarrow$ Center and `Snap Receive` $\rightarrow$ QB act as hard semantic anchors.
-2. **Pre-Snap Geometry Defines Formation Structure**: Uses robust median footpoints $(x + w/2, y + h)$ across stable pre-snap frames before motion.
-3. **Football Constraints Govern Legal Assignments**: Enforces 5-OL line sequence (`LT`, `LG`, `C`, `RG`, `RT`), QB placement, skill-position alignment, and defense level partitions (Front $\rightarrow$ LB $\rightarrow$ DB).
+1. **Actions Anchor Identities**: Definitions such as `Ball Snap` $\rightarrow$ Center and `Snap Receive` $\rightarrow$ QB act as hard semantic anchors with explicit side semantics (offense vs defense).
+2. **Pre-Snap Geometry Defines Formation Structure**: Uses robust median footpoints across stable pre-snap frames before motion, projected into an offensive reference frame (forward vector from QB to Center, orthogonal lateral vector to offensive left).
+3. **Joint CP-SAT Optimization Enforces Football Legality**: Decides final assignments via a genuine OR-Tools CP-SAT constrained optimization model ($x[t, s] \in \{0, 1\}$) enforcing 5-OL lateral ordering ($LT > LG > C > RG > RT$), formation bounds (11 offense, 11 defense), WR/CB wing depth coverage, and defense level ordering.
 4. **Cross-View Fusion at the Evidence Level**: Fuses sideline and endzone view evidence at the personnel/canonical slot level without requiring shared track IDs or frame synchronization.
-5. **Explicit `not_visible` Representation**: Players outside cropped camera views (e.g. endzone receivers/DBs) are assigned to canonical slots with `track_id=None` (`not_visible`).
-6. **Transparent Confidence & Review Reporting**: Automatically accepts high-confidence assignments ($\ge 0.90$) while generating Markdown review reports for ambiguous or conflicting cases.
+5. **Explicit 3-State Ground Truth & Slot Representation**: Distinguishes `ACTIVE_VISIBLE`, `ACTIVE_NOT_VISIBLE` (players outside cropped camera views), and `INACTIVE_SLOT`.
+6. **Transparent Confidence & Review Reporting**: Automatically evaluates confidence margins while generating Markdown review reports for ambiguous or conflicting cases.
 
 ---
 
@@ -33,10 +33,21 @@ Football-Position-Inference/
 │
 ├── config/                      # Configuration YAML files
 │   ├── position_taxonomy.yaml   # Offense/Defense position taxonomy & aliases
-│   ├── action_role_rules.yaml   # Action semantic aliases & role probability weights
-│   ├── scoring_weights.yaml     # Weights for action, geometry, model, and paired evidence
+│   ├── action_role_rules.yaml   # Action semantic aliases & side/role rules
+│   ├── scoring_weights.yaml     # Weights for action, geometry, and model evidence
+│   ├── personnel_constraints.yaml # Formation packages & personnel bounds
 │   ├── pairing.yaml             # View sequence order & pair confidence thresholds
 │   └── confidence.yaml          # Auto-accept (0.90) and review thresholds
+│
+├── scripts/
+│   └── build_test_fixtures.py   # Standalone deterministic fixture generator
+│
+├── tests/
+│   ├── fixtures/                # Self-contained reproducible test fixtures
+│   │   ├── jetsweep_pair_001_002/ # Authoritative JetSweep pair fixture
+│   │   └── power_pair_001_002/    # Authoritative Power pair fixture (with NV entries)
+│   ├── unit/                    # Fast isolated unit tests
+│   └── integration/             # End-to-end golden verification tests
 │
 ├── src/
 │   └── position_inference/

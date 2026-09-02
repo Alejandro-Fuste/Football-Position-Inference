@@ -12,11 +12,17 @@ def compute_spatial_features(
 ) -> Dict[int, Dict[str, float]]:
     """
     Computes Center-relative normalized coordinates, lateral offset, depth from LOS,
-    and spatial ranks for candidate player tracks.
+    and offensive-perspective coordinates for candidate player tracks.
+    Uses the forward vector from QB to Center and orthogonal lateral vector to project
+    formation coordinates into the true offensive reference frame.
     """
     features: Dict[int, Dict[str, float]] = {}
 
-    player_summaries = {tid: t for tid, t in track_summaries.items() if t.label == "player" and t.presnap_median_footpoint}
+    player_summaries = {
+        tid: t
+        for tid, t in track_summaries.items()
+        if t.label == "player" and (t.presnap_median_footpoint or t.median_footpoint)
+    }
     if not player_summaries:
         return features
 
@@ -26,61 +32,103 @@ def compute_spatial_features(
         scale = 100.0
 
     if center_track_id and center_track_id in player_summaries:
-        center_fp = player_summaries[center_track_id].presnap_median_footpoint
+        center_fp = player_summaries[center_track_id].presnap_median_footpoint or player_summaries[center_track_id].median_footpoint
     else:
-        fps = [t.presnap_median_footpoint for t in player_summaries.values()]
+        fps = [t.presnap_median_footpoint or t.median_footpoint for t in player_summaries.values()]
         center_fp = (float(np.median([fp[0] for fp in fps])), float(np.median([fp[1] for fp in fps])))
 
     cx, cy = center_fp
-    qb_fp = player_summaries[qb_track_id].presnap_median_footpoint if qb_track_id and qb_track_id in player_summaries else None
+    c_arr = np.array([cx, cy], dtype=np.float64)
+
+    qb_fp = (
+        (player_summaries[qb_track_id].presnap_median_footpoint or player_summaries[qb_track_id].median_footpoint)
+        if qb_track_id and qb_track_id in player_summaries
+        else None
+    )
+
+    # Determine unit forward vector u_hat (from QB to Center, or based on direction)
+    if qb_fp and (qb_fp[0] != cx or qb_fp[1] != cy):
+        qb_arr = np.array(qb_fp, dtype=np.float64)
+        u_vec = c_arr - qb_arr
+        norm_u = np.linalg.norm(u_vec)
+        u_hat = u_vec / norm_u if norm_u > 0 else np.array([-1.0, 0.0])
+    else:
+        if direction == "left":
+            u_hat = np.array([-1.0, 0.0])
+        elif direction == "right":
+            u_hat = np.array([1.0, 0.0])
+        elif direction == "up":
+            u_hat = np.array([0.0, -1.0])
+        elif direction == "down":
+            u_hat = np.array([0.0, 1.0])
+        else:
+            u_hat = np.array([-1.0, 0.0])
+
+    # Orthogonal unit vector v_hat pointing to the offensive LEFT
+    # When facing u_hat, a 90-degree left turn is (u_y, -u_x)
+    v_hat = np.array([u_hat[1], -u_hat[0]], dtype=np.float64)
 
     all_tids = list(player_summaries.keys())
-    x_ranks = {tid: rank for rank, tid in enumerate(sorted(all_tids, key=lambda t: player_summaries[t].presnap_median_footpoint[0]))}
-    y_ranks = {tid: rank for rank, tid in enumerate(sorted(all_tids, key=lambda t: player_summaries[t].presnap_median_footpoint[1]))}
+    x_ranks = {
+        tid: rank
+        for rank, tid in enumerate(
+            sorted(
+                all_tids,
+                key=lambda t: (player_summaries[t].presnap_median_footpoint or player_summaries[t].median_footpoint)[0],
+            )
+        )
+    }
+    y_ranks = {
+        tid: rank
+        for rank, tid in enumerate(
+            sorted(
+                all_tids,
+                key=lambda t: (player_summaries[t].presnap_median_footpoint or player_summaries[t].median_footpoint)[1],
+            )
+        )
+    }
 
     for tid, summary in player_summaries.items():
-        px, py = summary.presnap_median_footpoint
+        fp = summary.presnap_median_footpoint or summary.median_footpoint
+        px, py = fp
+        p_arr = np.array([px, py], dtype=np.float64)
+        diff = p_arr - c_arr
 
-        dx = (px - cx) / scale
-        dy = (py - cy) / scale
+        # Project into offensive reference frame
+        lat_proj = float(np.dot(diff, v_hat) / scale)
+        depth_backfield_proj = float(np.dot(diff, -u_hat) / scale)
 
-        # Transform to depth_los (positive = defense ahead of LOS, negative = offense backfield)
-        # and lateral_offset (negative = right side of offense, positive = left side of offense)
-        if direction == "left":
-            depth_los = -dx
-            lateral_offset = dy
-        elif direction == "right":
-            depth_los = dx
-            lateral_offset = -dy
-        elif direction == "up":
-            depth_los = -dy
-            lateral_offset = dx
-        elif direction == "down":
-            depth_los = dy
-            lateral_offset = -dx
-        else:
-            depth_los = -dx
-            lateral_offset = dy
+        depth_los = -depth_backfield_proj
+        depth_offense = depth_backfield_proj
+        lateral_offense = lat_proj
 
-        dist_center = float(np.sqrt(dx ** 2 + dy ** 2))
+        dist_center = float(np.linalg.norm(diff) / scale)
 
         dist_qb = 0.0
         if qb_fp:
-            qbx, qby = qb_fp
-            dist_qb = float(np.sqrt(((px - qbx) / scale) ** 2 + ((py - qby) / scale) ** 2))
+            dist_qb = float(np.linalg.norm(p_arr - np.array(qb_fp)) / scale)
 
-        other_fps = [player_summaries[o].presnap_median_footpoint for o in all_tids if o != tid]
+        other_fps = [
+            (player_summaries[o].presnap_median_footpoint or player_summaries[o].median_footpoint)
+            for o in all_tids
+            if o != tid
+        ]
         if other_fps:
-            nn_dists = [np.sqrt(((px - ox) / scale) ** 2 + ((py - oy) / scale) ** 2) for ox, oy in other_fps]
+            nn_dists = [np.linalg.norm(p_arr - np.array(o_fp)) / scale for o_fp in other_fps]
             min_nn_dist = float(min(nn_dists))
         else:
             min_nn_dist = 0.0
+
+        dx = (px - cx) / scale
+        dy = (py - cy) / scale
 
         feat_dict = {
             "x_norm": float(dx),
             "y_norm": float(dy),
             "depth_los": float(depth_los),
-            "lateral_offset": float(lateral_offset),
+            "depth_offense": float(depth_offense),
+            "lateral_offset": float(lateral_offense),
+            "lateral_offense": float(lateral_offense),
             "dist_center": dist_center,
             "dist_qb": dist_qb,
             "min_nn_dist": min_nn_dist,

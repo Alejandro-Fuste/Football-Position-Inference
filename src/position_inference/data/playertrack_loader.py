@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-from typing import List, Union, Dict, Optional
+from typing import List, Union, Dict, Optional, Tuple
 
 from position_inference.config import get_position_taxonomy
 from position_inference.data.schemas import GroundTruthRole
@@ -9,6 +9,7 @@ from position_inference.data.schemas import GroundTruthRole
 def load_ground_truth_roles(csv_source: Union[str, Path], prefix_override: str = None) -> List[GroundTruthRole]:
     """
     Parses PlayerTrack ground-truth CSV sheets into normalized GroundTruthRole objects.
+    Preserves source_label, normalized_position, and track_state (VISIBLE, NOT_VISIBLE, UNKNOWN_GROUND_TRUTH).
     """
     csv_path = Path(csv_source)
     if not csv_path.exists():
@@ -68,20 +69,26 @@ def load_ground_truth_roles(csv_source: Union[str, Path], prefix_override: str =
             if not cell:
                 continue
 
-            pos, track_id = _parse_position_cell(cell, aliases)
-            if pos:
+            parsed = _parse_position_cell(cell, aliases)
+            if parsed is None:
+                continue
 
-                side = _determine_side(pos, taxonomy, row_count_for_video)
+            raw_pos, norm_pos, track_id, track_state, allowed_preds = parsed
 
-                roles.append(
-                    GroundTruthRole(
-                        video_id=video_id,
-                        side=side,
-                        position=pos,
-                        track_id=track_id,
-                        source_row=r_idx + 1,
-                    )
+            side = _determine_side(norm_pos, taxonomy, row_count_for_video)
+
+            roles.append(
+                GroundTruthRole(
+                    video_id=video_id,
+                    side=side,
+                    position=norm_pos,
+                    track_id=track_id,
+                    source_label=raw_pos,
+                    track_state=track_state,
+                    allowed_predictions=allowed_preds,
+                    source_row=r_idx + 1,
                 )
+            )
 
         if first_cell:
             row_count_for_video = 1
@@ -89,28 +96,50 @@ def load_ground_truth_roles(csv_source: Union[str, Path], prefix_override: str =
     return roles
 
 
-def _parse_position_cell(cell: str, aliases: Dict[str, str]):
+def _parse_position_cell(
+    cell: str, aliases: Dict[str, str]
+) -> Optional[Tuple[str, str, Optional[int], str, Optional[List[str]]]]:
     cell = cell.strip()
-    if not cell:
-        return None, None
+    if not cell or cell == "-":
+        return None
 
     if "," in cell:
         parts = [p.strip() for p in cell.split(",", 1)]
         raw_pos = parts[0]
         raw_track = parts[1]
     else:
-
         raw_pos = cell
         raw_track = ""
 
     norm_pos = aliases.get(raw_pos, raw_pos)
 
-    track_id: Optional[int] = None
-    clean_track = raw_track.replace("[", "").replace("]", "").strip()
-    if clean_track.isdigit():
-        track_id = int(clean_track)
+    allowed_preds: Optional[List[str]] = None
+    if norm_pos == "SAF":
+        allowed_preds = ["FS", "SS"]
 
-    return norm_pos, track_id
+    clean_track = raw_track.strip()
+    clean_track_stripped = clean_track.replace("[", "").replace("]", "").strip()
+
+    if clean_track_stripped.upper() == "NV":
+        track_state = "NOT_VISIBLE"
+        track_id = None
+    elif clean_track_stripped == "?" or clean_track_stripped == "" or clean_track_stripped.upper() == "UNKNOWN":
+        track_state = "UNKNOWN_GROUND_TRUTH"
+        track_id = None
+    elif clean_track_stripped.isdigit():
+        track_state = "VISIBLE"
+        track_id = int(clean_track_stripped)
+    else:
+        # Handle cases like "WR,9,17" or unknown symbols
+        if any(c.isdigit() for c in clean_track_stripped):
+            digits = "".join(c for c in clean_track_stripped.split(",")[0] if c.isdigit())
+            track_state = "VISIBLE" if digits else "UNKNOWN_GROUND_TRUTH"
+            track_id = int(digits) if digits else None
+        else:
+            track_state = "UNKNOWN_GROUND_TRUTH"
+            track_id = None
+
+    return raw_pos, norm_pos, track_id, track_state, allowed_preds
 
 
 def _determine_side(position: str, taxonomy: Dict, row_index: int) -> str:
@@ -120,6 +149,8 @@ def _determine_side(position: str, taxonomy: Dict, row_index: int) -> str:
     if position in offense_positions:
         return "offense"
     if position in defense_positions:
+        return "defense"
+    if position == "SAF":
         return "defense"
 
     return "offense" if row_index == 0 else "defense"

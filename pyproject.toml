@@ -24,6 +24,7 @@ position-inference = "position_inference.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+norecursedirs = ["fixtures", "data", ".venv"]
 markers = [
     "integration: mark test as integration test",
 ]

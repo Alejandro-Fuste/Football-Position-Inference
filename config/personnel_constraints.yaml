@@ -1,0 +1,25 @@
+offense:
+  total_players: 11
+  fixed_positions:
+    C: 1
+    LT: 1
+    LG: 1
+    RG: 1
+    RT: 1
+    QB: 1
+  skill_bounds:
+    RB: {min: 0, max: 2}
+    FB: {min: 0, max: 1}
+    TE: {min: 0, max: 3}
+    WR: {min: 0, max: 5}
+  total_skill_players: 5
+
+defense:
+  total_players: 11
+  bounds:
+    DE: {min: 0, max: 3}
+    DT: {min: 0, max: 4}
+    LB: {min: 1, max: 5}
+    CB: {min: 2, max: 5}
+    FS: {min: 0, max: 1}
+    SS: {min: 0, max: 1}

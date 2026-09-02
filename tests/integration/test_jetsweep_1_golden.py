@@ -2,9 +2,7 @@ from pathlib import Path
 import pytest
 
 from position_inference.data import (
-    load_action_annotations,
     load_ground_truth_roles,
-    load_mot_detections,
 )
 from position_inference.evaluation import evaluate_predictions
 from position_inference.inference import fuse_paired_views
@@ -15,15 +13,15 @@ from position_inference.output import (
 )
 from position_inference.pipeline import infer_video_positions
 
-DATA_DIR = Path("/Users/alejandro/Desktop/Projects/FilmBreakdownAI/Utilities/Combine_Tracks_and_Actions/data")
+FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "jetsweep_pair_001_002"
 
 
 @pytest.mark.integration
 def test_jetsweep_1_golden_inference(tmp_path):
-    mot_path_s = DATA_DIR / "tracking" / "JetSweep" / "JetSweep_1_cvat_mot.zip"
-    mot_path_e = DATA_DIR / "tracking" / "JetSweep" / "JetSweep_2_cvat_mot.zip"
-    actions_path = DATA_DIR / "key_actions" / "JetSweep.csv"
-    gt_path = DATA_DIR / "player_tracks" / "JetSweep.csv"
+    mot_path_s = FIXTURE_DIR / "JetSweep_1_cvat_mot.zip"
+    mot_path_e = FIXTURE_DIR / "JetSweep_2_cvat_mot.zip"
+    actions_path = FIXTURE_DIR / "key_actions.csv"
+    gt_path = FIXTURE_DIR / "player_tracks.csv"
 
     assert mot_path_s.exists(), "Sideline MOT zip missing"
     assert mot_path_e.exists(), "Endzone MOT zip missing"
@@ -34,36 +32,118 @@ def test_jetsweep_1_golden_inference(tmp_path):
     s_result = infer_video_positions(mot_path_s, actions_path, video_id="JetSweep_1")
     assert s_result.video_id == "JetSweep_1"
     assert s_result.view == "sideline"
+    assert s_result.offense_direction == "left"
     assert len(s_result.assignments) >= 22
 
-    # 2. Infer Endzone clip
-    e_result = infer_video_positions(mot_path_e, actions_path, video_id="JetSweep_2")
-    assert e_result.video_id == "JetSweep_2"
+    # Map slot_id / position to track_id
+    assigned_by_pos = {}
+    for a in s_result.assignments:
+        if a.track_id is not None:
+            assigned_by_pos.setdefault(a.position, set()).add(a.track_id)
 
-    # 3. Fuse paired views
+    # 2. Strict Offense Golden Verification
+    assert assigned_by_pos.get("C") == {7}, "Center must be track 7"
+    assert assigned_by_pos.get("QB") == {17}, "QB must be track 17"
+    assert assigned_by_pos.get("LT") == {5}, "LT must be track 5"
+    assert assigned_by_pos.get("LG") == {3}, "LG must be track 3"
+    assert assigned_by_pos.get("RG") == {9}, "RG must be track 9"
+    assert assigned_by_pos.get("RT") == {13}, "RT must be track 13"
+    assert assigned_by_pos.get("TE") == {12}, "TE must be track 12"
+    assert assigned_by_pos.get("RB") == {20}, "RB must be track 20"
+    assert assigned_by_pos.get("WR") == {1, 19, 21}, "WR set must be exactly {1, 19, 21}"
+
+    # 3. Strict Defense Golden Verification
+    assert assigned_by_pos.get("DT") == {4}, "DT must be track 4"
+    assert assigned_by_pos.get("DE") == {6, 8}, "DE set must be exactly {6, 8}"
+    assert assigned_by_pos.get("LB") == {10, 15, 18}, "LB set must be exactly {10, 15, 18}"
+    assert assigned_by_pos.get("CB") == {14, 16, 22}, "CB set must be exactly {14, 16, 22}"
+    assert assigned_by_pos.get("FS") == {2}, "FS must be track 2"
+    assert assigned_by_pos.get("SS") == {11}, "SS must be track 11"
+
+    # 4. Infer Endzone clip and fuse
+    from position_inference.data.schemas import VideoMetadata
+    e_meta = VideoMetadata(video_id="JetSweep_2", dataset_order=2, view_raw="endzone")
+    e_result = infer_video_positions(mot_path_e, actions_path, video_id="JetSweep_2", video_metadata=e_meta)
+    assert e_result.video_id == "JetSweep_2"
+    assert e_result.view == "endzone"
+
     s_fused, e_fused, warnings = fuse_paired_views(s_result, e_result)
     assert s_fused is not None
     assert e_fused is not None
 
-    # 4. Compare with Ground Truth
+    # 5. Evaluate against ground truth
     gt_all = load_ground_truth_roles(gt_path)
     gt_js1 = [g for g in gt_all if g.video_id == "JetSweep_1"]
     assert len(gt_js1) == 22, "Ground truth for JetSweep_1 should contain 22 roles"
 
     metrics = evaluate_predictions(gt_js1, s_fused.assignments)
-    assert metrics["center_accuracy"] == 1.0, "Center should be correctly inferred"
-    assert metrics["qb_accuracy"] == 1.0, "QB should be correctly inferred"
-    assert metrics["high_confidence_precision"] >= 0.90, "High confidence assignments should have >=90% precision"
+    assert metrics["visible_accuracy"] == 1.0, "All visible tracks must be correctly classified"
+    assert metrics["offense_accuracy"] == 1.0, "All 11 offense roles must be 100% accurate"
+    assert metrics["defense_accuracy"] == 1.0, "All 11 defense roles must be 100% accurate"
+    assert metrics["center_accuracy"] == 1.0, "Center accuracy must be 1.0"
+    assert metrics["qb_accuracy"] == 1.0, "QB accuracy must be 1.0"
+    assert metrics["ol_accuracy"] == 1.0, "5-OL line accuracy must be 1.0"
 
-    # 5. Verify outputs written cleanly
+    # 6. Verify export outputs
     out_csv = tmp_path / "JetSweep_1_playertrack.csv"
     out_json = tmp_path / "JetSweep_1_inference.json"
-    out_md = tmp_path / "JetSweep_1_review.md"
+    out_md = tmp_path / "JetSweep_1_report.md"
 
     write_playertrack_csv(s_fused, out_csv)
     write_inference_json(s_fused, out_json)
-    write_review_report_markdown(s_fused, out_md)
+    write_review_report_markdown(s_fused, out_md, pair_id="jetsweep_pair_001_002")
 
-    assert out_csv.exists()
-    assert out_json.exists()
-    assert out_md.exists()
+    assert out_csv.exists() and out_csv.stat().st_size > 0
+    assert out_json.exists() and out_json.stat().st_size > 0
+    assert out_md.exists() and out_md.stat().st_size > 0
+
+
+@pytest.mark.integration
+def test_jetsweep_1_regression_rejects_old_incorrect_mapping():
+    """
+    Regression test proving that the previously generated incorrect JetSweep mapping
+    does not pass as a golden result.
+    """
+    gt_path = FIXTURE_DIR / "player_tracks.csv"
+    gt_all = load_ground_truth_roles(gt_path)
+    gt_js1 = [g for g in gt_all if g.video_id == "JetSweep_1"]
+
+    # The old incorrect mapping generated by the broken sequential picker
+    old_incorrect_assignments = [
+        # Offense was severely broken: DEs assigned to OL, OL assigned to WR/TE
+        {"slot_id": "offense.C_1", "side": "offense", "position": "C", "track_id": 7, "visibility": "visible"},
+        {"slot_id": "offense.QB_1", "side": "offense", "position": "QB", "track_id": 17, "visibility": "visible"},
+        {"slot_id": "offense.LG_1", "side": "offense", "position": "LG", "track_id": 8, "visibility": "visible"},  # WRONG (8 is DE)
+        {"slot_id": "offense.LT_1", "side": "offense", "position": "LT", "track_id": 6, "visibility": "visible"},  # WRONG (6 is DE)
+        {"slot_id": "offense.RG_1", "side": "offense", "position": "RG", "track_id": 4, "visibility": "visible"},  # WRONG (4 is DT)
+        {"slot_id": "offense.RT_1", "side": "offense", "position": "RT", "track_id": 3, "visibility": "visible"},  # WRONG (3 is LG)
+        {"slot_id": "offense.TE_1", "side": "offense", "position": "TE", "track_id": 20, "visibility": "visible"}, # WRONG (20 is RB)
+        {"slot_id": "offense.RB_1", "side": "offense", "position": "RB", "track_id": 12, "visibility": "visible"}, # WRONG (12 is TE)
+        {"slot_id": "offense.WR_1", "side": "offense", "position": "WR", "track_id": 5, "visibility": "visible"},  # WRONG (5 is LT)
+        {"slot_id": "offense.WR_2", "side": "offense", "position": "WR", "track_id": 9, "visibility": "visible"},  # WRONG (9 is RG)
+        {"slot_id": "offense.WR_3", "side": "offense", "position": "WR", "track_id": 13, "visibility": "visible"}, # WRONG (13 is RT)
+        # Defense was also severely broken
+        {"slot_id": "defense.LB_1", "side": "defense", "position": "LB", "track_id": 1, "visibility": "visible"},  # WRONG (1 is WR)
+        {"slot_id": "defense.LB_2", "side": "defense", "position": "LB", "track_id": 19, "visibility": "visible"}, # WRONG (19 is WR)
+        {"slot_id": "defense.LB_3", "side": "defense", "position": "LB", "track_id": 21, "visibility": "visible"}, # WRONG (21 is WR)
+    ]
+
+    from position_inference.data.schemas import PositionAssignment
+    mock_assignments = [
+        PositionAssignment(
+            slot_id=d["slot_id"],
+            side=d["side"],
+            position=d["position"],
+            track_id=d["track_id"],
+            visibility=d["visibility"],
+            confidence=0.90,
+        )
+        for d in old_incorrect_assignments
+    ]
+
+    metrics = evaluate_predictions(gt_js1, mock_assignments)
+
+    # Prove that the old mapping completely fails golden standards
+    assert metrics["ol_accuracy"] < 0.30, "Old mapping incorrectly passed OL"
+    assert metrics["offense_accuracy"] < 0.30, "Old mapping incorrectly passed Offense"
+    assert metrics["visible_accuracy"] < 0.30, "Old mapping incorrectly passed overall accuracy"
