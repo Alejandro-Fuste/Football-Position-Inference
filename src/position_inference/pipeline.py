@@ -1,9 +1,10 @@
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from position_inference.data import (
     ActionAnnotation,
+    MotDetection,
     VideoMetadata,
     ViewInferenceResult,
     load_action_annotations,
@@ -36,26 +37,23 @@ from position_inference.semantics.personnel import extract_personnel_hypothesis
 logger = logging.getLogger(__name__)
 
 
-def _resolve_semantic_play_type(video_id: str, metadata: Optional[VideoMetadata]) -> Optional[str]:
-    """Return the most specific play type available for action-role rules.
+def _resolve_semantic_play_type(video_id: str, video_metadata: Optional[VideoMetadata]) -> Optional[str]:
+    """Prefer a specific play identity over a generic DatasetSummary category.
 
-    DatasetSummary currently uses broad categories such as ``Run`` for JetSweep clips.
-    Those broad labels are useful metadata but are not specific enough for play-conditioned
-    semantic rules such as JetSweep BallCarry -> WR. When the metadata value is generic,
-    use the clip-name prefix (e.g. ``JetSweep_2`` -> ``JetSweep``) as the semantic play type.
+    DatasetSummary may contain coarse categories such as ``Run``. Action-role rules need the
+    concrete play family (for example ``JetSweep``) when it can be safely derived from the
+    clip identifier. This keeps play-conditioned semantics general without hard-coding tracks.
     """
-    metadata_play = (getattr(metadata, "play_type", None) or "").strip()
-    generic = {
-        "run", "pass", "special teams", "specialteams", "kick", "punt", "field goal",
-        "offense", "defense", "unknown", "",
-    }
-    if metadata_play.lower() not in generic:
+    metadata_play = (video_metadata.play_type or "").strip() if video_metadata else ""
+    generic_categories = {"run", "pass", "special teams", "specialteams", "unknown", ""}
+    if metadata_play.lower() not in generic_categories:
         return metadata_play
 
     stem = Path(str(video_id)).stem
-    prefix, sep, suffix = stem.rpartition("_")
-    if sep and suffix.isdigit() and prefix:
-        return prefix
+    if "_" in stem:
+        prefix = stem.rsplit("_", 1)[0]
+        if prefix:
+            return prefix
     return metadata_play or None
 
 
@@ -70,7 +68,7 @@ def infer_video_positions(
     personnel_priors: Optional[Dict[str, int]] = None,
     solver_pass: int = 1,
 ) -> ViewInferenceResult:
-    """Run the corrected V1 structured position-inference pipeline for one video."""
+    """Main single-video position inference pipeline."""
     hard_warnings: List[str] = []
     meta_src = None
 
@@ -106,14 +104,11 @@ def infer_video_positions(
 
     track_summaries, rejected_tids = evaluate_player_validity(track_summaries, actions)
     id_switches = detect_id_switches(track_summaries)
-
     snap_frame = identify_snap_frame(actions)
     extract_presnap_footpoints(track_summaries, snap_frame)
 
-    semantic_play_type = _resolve_semantic_play_type(video_id, video_metadata)
-    center_tid, qb_tid, action_role_scores, track_side_scores = extract_semantic_anchors(
-        actions, semantic_play_type
-    )
+    play_type = _resolve_semantic_play_type(video_id, video_metadata)
+    center_tid, qb_tid, action_role_scores, track_side_scores = extract_semantic_anchors(actions, play_type)
 
     dir_pred = infer_offensive_direction(
         track_summaries,
