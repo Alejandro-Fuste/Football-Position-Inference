@@ -43,40 +43,48 @@ def _sideline_geometry_scores(depth_los: float, depth_off: float, lat_off: float
 
 
 def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float, dist_c: float) -> Dict[str, float]:
-    """Geometry priors specialized for the endzone camera.
+    """Endzone-specific geometry priors.
 
-    Endzone views are strongest in the interior box. We therefore use depth from the LOS
-    and offensive-perspective lateral ordering primarily to distinguish OL/DL/LB/backfield,
-    while deliberately reducing confidence for perimeter WR/CB/Safety decisions that are
-    frequently cropped or perspective-compressed.
+    ``depth_off`` is positive on the offense/backfield side of the Center and negative
+    across the LOS on the defensive side. ``depth_los`` is the exact inverse. The OL and
+    defensive-front scoring bands therefore must not overlap broadly; otherwise a DE just
+    across the line can receive the same tackle score as a true offensive lineman.
     """
     abs_lat = abs(lat_off)
     scores: Dict[str, float] = {}
 
-    # Anchors/interior offense. Broader OL band than sideline because perspective compresses x.
     scores["C"] = 1.0 if dist_c < 0.30 and abs(depth_off) < 0.45 else max(0.0, 1.0 - 2.2 * dist_c)
     scores["QB"] = 1.0 if 1.0 <= depth_off <= 3.2 and abs_lat <= 1.0 else (0.45 if depth_off >= 0.8 and abs_lat <= 1.2 else 0.08)
     scores["RB"] = 1.0 if depth_off >= 2.0 and abs_lat <= 1.35 else (0.55 if depth_off >= 1.3 and abs_lat <= 1.5 else 0.08)
     scores["FB"] = 0.75 if 1.0 <= depth_off <= 2.4 and abs_lat <= 1.2 else 0.08
 
-    on_ol_band = -0.9 <= depth_off <= 1.1 and dist_c > 0.18 and abs_lat <= 1.65
-    # Let the CP-SAT ordering constraint do most of the exact LT/LG/RG/RT separation.
-    # Geometry gives smooth side preference rather than narrow sideline thresholds.
-    scores["LT"] = 0.95 if on_ol_band and lat_off > 0.45 else (0.65 if on_ol_band and lat_off > 0 else 0.08)
-    scores["LG"] = 0.95 if on_ol_band and 0.05 < lat_off <= 0.70 else (0.60 if on_ol_band and lat_off > 0 else 0.08)
-    scores["RG"] = 0.95 if on_ol_band and -0.75 <= lat_off < -0.05 else (0.60 if on_ol_band and lat_off < 0 else 0.08)
-    scores["RT"] = 0.95 if on_ol_band and lat_off < -0.45 else (0.65 if on_ol_band and lat_off < 0 else 0.08)
+    # Offensive linemen should be on (or slightly behind) the Center's LOS row.
+    # Allow a small negative tolerance for detector/perspective noise, but do not let
+    # clearly defensive-side tracks compete strongly for OL slots.
+    on_ol_band = -0.20 <= depth_off <= 0.90 and dist_c > 0.18 and abs_lat <= 1.75
+    wrong_side_for_ol = depth_off < -0.20
 
-    # TE is usually near the edge of the OL surface and still visible in endzone footage.
-    scores["TE"] = 0.90 if -1.0 <= depth_off <= 1.2 and 0.9 <= abs_lat <= 1.9 else 0.12
-    # Perimeter WR evidence is intentionally conservative in endzone views.
+    if wrong_side_for_ol:
+        scores["LT"] = scores["LG"] = scores["RG"] = scores["RT"] = 0.02
+    else:
+        scores["LT"] = 0.98 if on_ol_band and lat_off > 0.45 else (0.68 if on_ol_band and lat_off > 0 else 0.06)
+        scores["LG"] = 0.98 if on_ol_band and 0.05 < lat_off <= 0.75 else (0.64 if on_ol_band and lat_off > 0 else 0.06)
+        scores["RG"] = 0.98 if on_ol_band and -0.80 <= lat_off < -0.05 else (0.64 if on_ol_band and lat_off < 0 else 0.06)
+        scores["RT"] = 0.98 if on_ol_band and lat_off < -0.45 else (0.68 if on_ol_band and lat_off < 0 else 0.06)
+
+    # TE is attached/near-attached to the offensive surface and likewise should not be
+    # scored strongly when the track is clearly across the LOS.
+    scores["TE"] = 0.92 if -0.20 <= depth_off <= 1.0 and 0.9 <= abs_lat <= 2.0 else 0.08
     scores["WR"] = 0.65 if abs_lat >= 2.2 else (0.30 if abs_lat >= 1.6 else 0.08)
 
-    # Defense: front is close to the LOS, LB is distinctly deeper, perimeter DB evidence weaker.
-    scores["DT"] = 0.95 if -0.3 <= depth_los <= 1.35 and abs_lat <= 0.65 else 0.10
-    scores["DE"] = 0.95 if -0.4 <= depth_los <= 1.65 and 0.55 <= abs_lat <= 1.75 else 0.10
-    scores["LB"] = 0.95 if 1.35 <= depth_los <= 4.2 and abs_lat <= 2.2 else (0.40 if 0.8 <= depth_los <= 3.0 else 0.10)
-    scores["CB"] = 0.60 if abs_lat >= 2.2 and depth_los >= 0.0 else (0.25 if abs_lat >= 1.8 else 0.08)
+    # Defensive front should be on the defensive side of the Center. A small tolerance
+    # around zero handles neutral-zone/perspective noise without making OL and DL symmetric.
+    on_def_front = -0.10 <= depth_los <= 1.75
+    scores["DT"] = 0.98 if on_def_front and abs_lat <= 0.70 else 0.06
+    scores["DE"] = 0.98 if on_def_front and 0.50 <= abs_lat <= 1.90 else 0.06
+
+    scores["LB"] = 0.96 if 1.30 <= depth_los <= 4.2 and abs_lat <= 2.3 else (0.35 if 0.75 <= depth_los <= 3.0 else 0.08)
+    scores["CB"] = 0.60 if abs_lat >= 2.2 and depth_los >= 0.0 else (0.22 if abs_lat >= 1.8 else 0.06)
 
     if depth_los >= 3.0:
         scores["SAF"] = 0.75
@@ -85,7 +93,7 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
         else:
             scores["SS"], scores["FS"] = 0.70, 0.40
     else:
-        scores["FS"] = scores["SS"] = scores["SAF"] = 0.08
+        scores["FS"] = scores["SS"] = scores["SAF"] = 0.06
     return scores
 
 
