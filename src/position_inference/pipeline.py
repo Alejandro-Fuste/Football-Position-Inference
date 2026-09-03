@@ -135,6 +135,7 @@ def infer_video_positions(
         action_role_scores,
         view=view_pred.view,
         learned_model=learned_model,
+        snap_frame=snap_frame,
     )
 
     all_assignments = solve_global_assignments(
