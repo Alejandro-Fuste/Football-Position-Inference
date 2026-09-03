@@ -88,19 +88,15 @@ def _is_presnap_solver_eligible(summary: Optional[TrackSummary], snap_frame: Opt
 
 
 def _presnap_stability_penalty(summary: TrackSummary, snap_frame: Optional[int]) -> float:
-    """Penalize tracks that only become observable immediately before the snap."""
     if snap_frame is None or snap_frame <= 0:
         return 0.0
-
     presnap_frames = [f for f in summary.frames_present if f <= snap_frame]
     if not presnap_frames:
         return 2.0
-
     first = min(presnap_frames)
     observed_span = max(1, snap_frame - first + 1)
     full_span = max(1, snap_frame + 1)
     span_fraction = min(1.0, observed_span / full_span)
-
     if span_fraction >= 0.50:
         return 0.0
     return 2.0 * (0.50 - span_fraction) / 0.50
@@ -112,12 +108,12 @@ def _infer_structural_endzone_ol_roles(
     track_summaries: Dict[int, TrackSummary],
     snap_frame: Optional[int] = None,
 ) -> Dict[int, str]:
-    """Infer LT/LG/RG/RT relationally around the anchored Center.
+    """Infer LT/LG/RG/RT from the earliest reliable formation geometry.
 
-    For stacked endzone fronts, OL membership is identified by being the more
-    offensive/backfield-side player in a lateral lane, not by absolute closeness to
-    the LOS. This prevents a stable DE aligned over a guard from winning simply
-    because the defender is nearer the mathematical zero-depth line.
+    A structural OL candidate must be on, or slightly behind, the offensive side of
+    the Center/QB line. Tracks clearly across the LOS remain valid defensive candidates
+    in CP-SAT, but cannot receive the strong structural OL boost. This preserves the
+    separation needed for OL-vs-DL overlap in endzone views.
     """
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
     by_side = {"left": [], "right": []}
@@ -131,7 +127,12 @@ def _infer_structural_endzone_ol_roles(
         lat = feat.get("lateral_offense", 0.0)
         depth = feat.get("depth_offense", 0.0)
 
-        if dist_c < 0.15 or abs(depth) > 1.80 or abs(lat) < 0.05:
+        # Hard structural gate: a player clearly across the LOS cannot be an OL.
+        # The -0.10 tolerance allows small projection/camera error without reopening
+        # the defensive front as OL candidates.
+        if depth < -0.10:
+            continue
+        if dist_c < 0.15 or depth > 1.80 or abs(lat) < 0.05:
             continue
 
         a_scores = action_role_scores.get(tid, {})
@@ -139,12 +140,7 @@ def _infer_structural_endzone_ol_roles(
             continue
 
         stability_penalty = _presnap_stability_penalty(summary, snap_frame)
-        # Larger depth_offense means farther onto the offensive/backfield side.
-        # A small absolute-depth regularizer keeps the selected row near the LOS,
-        # while the primary term deliberately prefers the offensive member of a
-        # stacked OL/DL pair. Deep backfield candidates are already screened by
-        # semantic role evidence and the |depth| <= 1.80 structural window above.
-        row_cost = (-1.0 * depth) + (0.25 * abs(depth)) + stability_penalty
+        row_cost = abs(depth) + stability_penalty
         side = "left" if lat > 0 else "right"
         by_side[side].append((row_cost, abs(lat), tid))
 
@@ -165,9 +161,7 @@ def _infer_structural_endzone_ol_roles(
     return roles
 
 
-def _apply_endzone_role_family_semantics(
-    geom_scores: Dict[str, float], action_scores: Dict[str, float]
-) -> Dict[str, float]:
+def _apply_endzone_role_family_semantics(geom_scores: Dict[str, float], action_scores: Dict[str, float]) -> Dict[str, float]:
     adjusted = dict(geom_scores)
     te_evidence = action_scores.get("TE", 0.0)
     ol_family_evidence = action_scores.get("OL", 0.0)
@@ -201,14 +195,8 @@ def compute_candidate_role_scores(
     candidate_scores: Dict[int, Dict[str, float]] = {}
     learned_probs: Dict[int, Dict[str, float]] = {}
     structural_ol_roles = (
-        _infer_structural_endzone_ol_roles(
-            spatial_features,
-            action_role_scores,
-            track_summaries,
-            snap_frame=snap_frame,
-        )
-        if view == "endzone"
-        else {}
+        _infer_structural_endzone_ol_roles(spatial_features, action_role_scores, track_summaries, snap_frame=snap_frame)
+        if view == "endzone" else {}
     )
 
     if learned_model and learned_model.is_fitted:
@@ -234,10 +222,8 @@ def compute_candidate_role_scores(
 
         if view == "endzone":
             geom_scores = _apply_endzone_role_family_semantics(
-                _endzone_geometry_scores(depth_los, depth_off, lat_off, dist_c),
-                a_score,
+                _endzone_geometry_scores(depth_los, depth_off, lat_off, dist_c), a_score
             )
-
             expected_ol_role = structural_ol_roles.get(tid)
             if expected_ol_role:
                 for role in ("LT", "LG", "RG", "RT"):
