@@ -4,24 +4,32 @@ import numpy as np
 from position_inference.data.schemas import TrackSummary
 
 
+def _position_footpoint(summary: TrackSummary):
+    return (
+        summary.formation_anchor_footpoint
+        or summary.presnap_median_footpoint
+        or summary.median_footpoint
+    )
+
+
 def compute_spatial_features(
     track_summaries: Dict[int, TrackSummary],
     center_track_id: Optional[int] = None,
     qb_track_id: Optional[int] = None,
     direction: str = "left",
 ) -> Dict[int, Dict[str, float]]:
-    """
-    Computes Center-relative normalized coordinates, lateral offset, depth from LOS,
-    and offensive-perspective coordinates for candidate player tracks.
-    Uses the forward vector from QB to Center and orthogonal lateral vector to project
-    formation coordinates into the true offensive reference frame.
+    """Compute normalized formation geometry from immutable position anchors.
+
+    Position inference is anchored to the earliest reliable formation location. Later
+    pre-snap statistics remain available for motion/quality diagnostics, but they do not
+    move an already-established track's position geometry.
     """
     features: Dict[int, Dict[str, float]] = {}
 
     player_summaries = {
         tid: t
         for tid, t in track_summaries.items()
-        if t.label == "player" and (t.presnap_median_footpoint or t.median_footpoint)
+        if t.label == "player" and _position_footpoint(t)
     }
     if not player_summaries:
         return features
@@ -32,21 +40,23 @@ def compute_spatial_features(
         scale = 100.0
 
     if center_track_id and center_track_id in player_summaries:
-        center_fp = player_summaries[center_track_id].presnap_median_footpoint or player_summaries[center_track_id].median_footpoint
+        center_fp = _position_footpoint(player_summaries[center_track_id])
     else:
-        fps = [t.presnap_median_footpoint or t.median_footpoint for t in player_summaries.values()]
-        center_fp = (float(np.median([fp[0] for fp in fps])), float(np.median([fp[1] for fp in fps])))
+        fps = [_position_footpoint(t) for t in player_summaries.values()]
+        center_fp = (
+            float(np.median([fp[0] for fp in fps])),
+            float(np.median([fp[1] for fp in fps])),
+        )
 
     cx, cy = center_fp
     c_arr = np.array([cx, cy], dtype=np.float64)
 
     qb_fp = (
-        (player_summaries[qb_track_id].presnap_median_footpoint or player_summaries[qb_track_id].median_footpoint)
+        _position_footpoint(player_summaries[qb_track_id])
         if qb_track_id and qb_track_id in player_summaries
         else None
     )
 
-    # Determine unit forward vector u_hat (from QB to Center, or based on direction)
     if qb_fp and (qb_fp[0] != cx or qb_fp[1] != cy):
         qb_arr = np.array(qb_fp, dtype=np.float64)
         u_vec = c_arr - qb_arr
@@ -64,44 +74,34 @@ def compute_spatial_features(
         else:
             u_hat = np.array([-1.0, 0.0])
 
-    # Orthogonal unit vector v_hat pointing to the offensive LEFT
-    # When facing u_hat, a 90-degree left turn is (u_y, -u_x)
     v_hat = np.array([u_hat[1], -u_hat[0]], dtype=np.float64)
 
     all_tids = list(player_summaries.keys())
     x_ranks = {
         tid: rank
         for rank, tid in enumerate(
-            sorted(
-                all_tids,
-                key=lambda t: (player_summaries[t].presnap_median_footpoint or player_summaries[t].median_footpoint)[0],
-            )
+            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t])[0])
         )
     }
     y_ranks = {
         tid: rank
         for rank, tid in enumerate(
-            sorted(
-                all_tids,
-                key=lambda t: (player_summaries[t].presnap_median_footpoint or player_summaries[t].median_footpoint)[1],
-            )
+            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t])[1])
         )
     }
 
     for tid, summary in player_summaries.items():
-        fp = summary.presnap_median_footpoint or summary.median_footpoint
+        fp = _position_footpoint(summary)
         px, py = fp
         p_arr = np.array([px, py], dtype=np.float64)
         diff = p_arr - c_arr
 
-        # Project into offensive reference frame
         lat_proj = float(np.dot(diff, v_hat) / scale)
         depth_backfield_proj = float(np.dot(diff, -u_hat) / scale)
 
         depth_los = -depth_backfield_proj
         depth_offense = depth_backfield_proj
         lateral_offense = lat_proj
-
         dist_center = float(np.linalg.norm(diff) / scale)
 
         dist_qb = 0.0
@@ -109,7 +109,7 @@ def compute_spatial_features(
             dist_qb = float(np.linalg.norm(p_arr - np.array(qb_fp)) / scale)
 
         other_fps = [
-            (player_summaries[o].presnap_median_footpoint or player_summaries[o].median_footpoint)
+            _position_footpoint(player_summaries[o])
             for o in all_tids
             if o != tid
         ]
@@ -122,7 +122,7 @@ def compute_spatial_features(
         dx = (px - cx) / scale
         dy = (py - cy) / scale
 
-        feat_dict = {
+        features[tid] = {
             "x_norm": float(dx),
             "y_norm": float(dy),
             "depth_los": float(depth_los),
@@ -138,8 +138,7 @@ def compute_spatial_features(
             "bbox_width_norm": float(summary.median_bbox_width / scale),
             "bbox_aspect_ratio": float(summary.median_bbox_width / max(summary.median_bbox_height, 1.0)),
             "presnap_motion": float(summary.presnap_motion or 0.0),
+            "formation_anchor_frame": float(summary.formation_anchor_frame if summary.formation_anchor_frame is not None else -1),
         }
-
-        features[tid] = feat_dict
 
     return features
