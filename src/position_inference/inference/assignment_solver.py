@@ -22,6 +22,7 @@ def solve_global_assignments(
     view: str = "sideline",
     personnel_priors: Optional[Dict[str, int]] = None,
     solver_pass: int = 1,
+    snap_frame: Optional[int] = None,
 ) -> List[PositionAssignment]:
     """Global constrained optimizer for football position assignments.
 
@@ -45,12 +46,16 @@ def solve_global_assignments(
     for t in all_tracks:
         t_sum = track_summaries.get(t)
         if t_sum:
-            # A missing presnap footpoint must not remove an otherwise valid visible track
-            # from the CP-SAT candidate universe. Spatial feature extraction already falls
-            # back to median_footpoint when presnap geometry is unavailable, so the solver
-            # should use the same rule instead of forcing the corresponding slot to NV.
             if not (t_sum.presnap_median_footpoint or t_sum.median_footpoint):
                 continue
+
+            # Prefer actual pre-snap geometry. If that is unavailable, permit the median
+            # fallback only for a track that already existed by the snap. This preserves
+            # sparse-but-real pre-snap players while preventing late ID fragments / false
+            # positives from competing for canonical pre-snap positions.
+            if t_sum.presnap_median_footpoint is None and snap_frame is not None:
+                if t_sum.first_frame > snap_frame:
+                    continue
 
         is_off_eligible = t in off_set
         is_def_eligible = t in def_set
