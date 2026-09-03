@@ -88,13 +88,7 @@ def _is_presnap_solver_eligible(summary: Optional[TrackSummary], snap_frame: Opt
 
 
 def _presnap_stability_penalty(summary: TrackSummary, snap_frame: Optional[int]) -> float:
-    """Penalize tracks that only become observable immediately before the snap.
-
-    Structural OL roles should favor players that are established throughout the pre-snap
-    formation. A defender emerging from occlusion just before the snap remains eligible for
-    defensive assignment, but should not outrank a stable guard simply because the two are
-    geometrically stacked in the endzone projection.
-    """
+    """Penalize tracks that only become observable immediately before the snap."""
     if snap_frame is None or snap_frame <= 0:
         return 0.0
 
@@ -107,8 +101,6 @@ def _presnap_stability_penalty(summary: TrackSummary, snap_frame: Optional[int])
     full_span = max(1, snap_frame + 1)
     span_fraction = min(1.0, observed_span / full_span)
 
-    # No penalty for a track visible through at least half of the pre-snap window.
-    # Scale smoothly up to a strong penalty for tracks appearing only at the end.
     if span_fraction >= 0.50:
         return 0.0
     return 2.0 * (0.50 - span_fraction) / 0.50
@@ -120,7 +112,13 @@ def _infer_structural_endzone_ol_roles(
     track_summaries: Dict[int, TrackSummary],
     snap_frame: Optional[int] = None,
 ) -> Dict[int, str]:
-    """Infer LT/LG/RG/RT relationally around the anchored Center."""
+    """Infer LT/LG/RG/RT relationally around the anchored Center.
+
+    For stacked endzone fronts, OL membership is identified by being the more
+    offensive/backfield-side player in a lateral lane, not by absolute closeness to
+    the LOS. This prevents a stable DE aligned over a guard from winning simply
+    because the defender is nearer the mathematical zero-depth line.
+    """
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
     by_side = {"left": [], "right": []}
 
@@ -140,10 +138,13 @@ def _infer_structural_endzone_ol_roles(
         if max((a_scores.get(role, 0.0) for role in excluded_roles), default=0.0) >= 0.40:
             continue
 
-        defensive_side_penalty = 1.50 * max(0.0, -depth)
-        offensive_side_bonus = 0.10 * max(0.0, min(depth, 0.80))
         stability_penalty = _presnap_stability_penalty(summary, snap_frame)
-        row_cost = abs(depth) + defensive_side_penalty - offensive_side_bonus + stability_penalty
+        # Larger depth_offense means farther onto the offensive/backfield side.
+        # A small absolute-depth regularizer keeps the selected row near the LOS,
+        # while the primary term deliberately prefers the offensive member of a
+        # stacked OL/DL pair. Deep backfield candidates are already screened by
+        # semantic role evidence and the |depth| <= 1.80 structural window above.
+        row_cost = (-1.0 * depth) + (0.25 * abs(depth)) + stability_penalty
         side = "left" if lat > 0 else "right"
         by_side[side].append((row_cost, abs(lat), tid))
 
