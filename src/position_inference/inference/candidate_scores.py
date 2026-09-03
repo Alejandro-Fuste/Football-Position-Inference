@@ -12,7 +12,7 @@ def _sideline_geometry_scores(depth_los: float, depth_off: float, lat_off: float
     scores: Dict[str, float] = {}
     scores["C"] = 1.0 if dist_c < 0.25 and abs(depth_off) < 0.3 else max(0.0, 1.0 - 2.5 * dist_c)
     scores["QB"] = 1.0 if 1.2 <= depth_off <= 2.6 and abs_lat <= 0.8 else (0.5 if depth_off >= 1.0 and abs_lat <= 1.0 else 0.1)
-    scores["RB"] = 1.0 if (depth_off >= 2.2 and abs_lat <= 1.2) else (0.5 if (depth_off >= 1.5 and abs_lat <= 1.2 else 0.1))
+    scores["RB"] = 1.0 if (depth_off >= 2.2 and abs_lat <= 1.2) else (0.5 if (depth_off >= 1.5 and abs_lat <= 1.2) else 0.1)
     scores["FB"] = 0.8 if (1.0 <= depth_off <= 2.2 and abs_lat <= 1.0) else 0.1
 
     is_on_ol_band = abs_lat <= 1.2 and -1.0 <= depth_off <= 1.5 and dist_c > 0.2
@@ -52,9 +52,6 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     scores["RB"] = 1.0 if depth_off >= 2.0 and abs_lat <= 1.35 else (0.55 if depth_off >= 1.3 and abs_lat <= 1.5 else 0.08)
     scores["FB"] = 0.75 if 1.0 <= depth_off <= 2.4 and abs_lat <= 1.2 else 0.08
 
-    # Exact OL identity is supplied later by a relational five-man row model.
-    # Keep broad weak geometry here so that noisy perspective does not eliminate a
-    # real tackle before the structural model is applied.
     near_center_row = abs(depth_off) <= 1.60 and dist_c > 0.18
     base_ol = 0.35 if near_center_row else 0.04
     scores["LT"] = scores["LG"] = scores["RG"] = scores["RT"] = base_ol
@@ -83,16 +80,7 @@ def _infer_structural_endzone_ol_roles(
     spatial_features: Dict[int, Dict[str, float]],
     action_role_scores: Dict[int, Dict[str, float]],
 ) -> Dict[int, str]:
-    """Infer LT/LG/RG/RT relationally around the anchored Center.
-
-    Endzone tackles can appear much wider than a fixed normalized cutoff. The stable
-    invariant is relational: on offensive left (positive lateral) the nearer row member
-    is LG and the farther row member is LT; on offensive right (negative lateral) the
-    nearer member is RG and the farther member is RT.
-
-    Candidate ranking is dominated by closeness to the Center's depth row. Strong
-    semantic evidence for skill/backfield roles excludes a track from the OL family.
-    """
+    """Infer LT/LG/RG/RT relationally around the anchored Center."""
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
     by_side = {"left": [], "right": []}
 
@@ -108,8 +96,6 @@ def _infer_structural_endzone_ol_roles(
         if max((a_scores.get(role, 0.0) for role in excluded_roles), default=0.0) >= 0.40:
             continue
 
-        # Slightly prefer the offensive side of the projection when two rows overlap,
-        # but tolerate small negative depth because true OL can project across zero.
         defensive_side_penalty = 0.20 * max(0.0, -depth)
         row_cost = abs(depth) + defensive_side_penalty
         side = "left" if lat > 0 else "right"
@@ -117,8 +103,6 @@ def _infer_structural_endzone_ol_roles(
 
     roles: Dict[int, str] = {}
     for side in ("left", "right"):
-        # Choose the two tracks most consistent with the Center row, with no absolute
-        # width cutoff. Once selected, lateral distance determines guard vs tackle.
         selected = sorted(by_side[side], key=lambda item: (item[0], item[1], item[2]))[:2]
         if len(selected) < 2:
             continue
@@ -204,8 +188,6 @@ def compute_candidate_role_scores(
 
             expected_ol_role = structural_ol_roles.get(tid)
             if expected_ol_role:
-                # Make the relational role the clear geometry winner while keeping the
-                # other OL roles possible at low score for solver feasibility.
                 for role in ("LT", "LG", "RG", "RT"):
                     geom_scores[role] = max(geom_scores.get(role, 0.0), 0.20)
                 geom_scores[expected_ol_role] = max(geom_scores.get(expected_ol_role, 0.0), 0.98)
