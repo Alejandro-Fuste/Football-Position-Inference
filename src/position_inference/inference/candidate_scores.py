@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Set
+from typing import Dict, Optional
 import numpy as np
 
 from position_inference.config import get_scoring_weights
@@ -12,7 +12,7 @@ def _sideline_geometry_scores(depth_los: float, depth_off: float, lat_off: float
     scores: Dict[str, float] = {}
     scores["C"] = 1.0 if dist_c < 0.25 and abs(depth_off) < 0.3 else max(0.0, 1.0 - 2.5 * dist_c)
     scores["QB"] = 1.0 if 1.2 <= depth_off <= 2.6 and abs_lat <= 0.8 else (0.5 if depth_off >= 1.0 and abs_lat <= 1.0 else 0.1)
-    scores["RB"] = 1.0 if (depth_off >= 2.2 and abs_lat <= 1.2) else (0.5 if (depth_off >= 1.5 and abs_lat <= 1.2) else 0.1)
+    scores["RB"] = 1.0 if (depth_off >= 2.2 and abs_lat <= 1.2) else (0.5 if (depth_off >= 1.5 and abs_lat <= 1.2 else 0.1))
     scores["FB"] = 0.8 if (1.0 <= depth_off <= 2.2 and abs_lat <= 1.0) else 0.1
 
     is_on_ol_band = abs_lat <= 1.2 and -1.0 <= depth_off <= 1.5 and dist_c > 0.2
@@ -43,7 +43,7 @@ def _sideline_geometry_scores(depth_los: float, depth_off: float, lat_off: float
 
 
 def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float, dist_c: float) -> Dict[str, float]:
-    """Endzone-specific geometry priors with explicit OL/TE/DL separation."""
+    """Endzone-specific geometry priors."""
     abs_lat = abs(lat_off)
     scores: Dict[str, float] = {}
 
@@ -52,19 +52,20 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     scores["RB"] = 1.0 if depth_off >= 2.0 and abs_lat <= 1.35 else (0.55 if depth_off >= 1.3 and abs_lat <= 1.5 else 0.08)
     scores["FB"] = 0.75 if 1.0 <= depth_off <= 2.4 and abs_lat <= 1.2 else 0.08
 
-    on_ol_band = -0.65 <= depth_off <= 1.00 and dist_c > 0.18 and abs_lat <= 1.55
-    scores["LT"] = 0.92 if on_ol_band and lat_off > 0.35 else (0.45 if on_ol_band and lat_off > 0 else 0.04)
-    scores["LG"] = 0.92 if on_ol_band and 0.05 < lat_off <= 0.80 else (0.45 if on_ol_band and lat_off > 0 else 0.04)
-    scores["RG"] = 0.92 if on_ol_band and -0.85 <= lat_off < -0.05 else (0.45 if on_ol_band and lat_off < 0 else 0.04)
-    scores["RT"] = 0.92 if on_ol_band and lat_off < -0.35 else (0.45 if on_ol_band and lat_off < 0 else 0.04)
+    # Exact OL identity is supplied later by a relational five-man row model.
+    # Keep broad weak geometry here so that noisy perspective does not eliminate a
+    # real tackle before the structural model is applied.
+    near_center_row = abs(depth_off) <= 1.60 and dist_c > 0.18
+    base_ol = 0.35 if near_center_row else 0.04
+    scores["LT"] = scores["LG"] = scores["RG"] = scores["RT"] = base_ol
 
-    scores["TE"] = 0.94 if -0.40 <= depth_off <= 1.10 and 1.05 <= abs_lat <= 2.20 else (0.25 if -0.40 <= depth_off <= 1.10 and 0.85 <= abs_lat < 1.05 else 0.07)
-    scores["WR"] = 0.65 if abs_lat >= 2.2 else (0.30 if abs_lat >= 1.6 else 0.08)
+    scores["TE"] = 0.94 if -0.50 <= depth_off <= 1.20 and 1.05 <= abs_lat <= 2.40 else (0.25 if -0.50 <= depth_off <= 1.20 and 0.85 <= abs_lat < 1.05 else 0.07)
+    scores["WR"] = 0.65 if abs_lat >= 2.4 else (0.30 if abs_lat >= 1.7 else 0.08)
 
     on_def_front = -0.10 <= depth_los <= 1.90
-    scores["DT"] = 0.98 if on_def_front and abs_lat <= 0.75 else 0.06
-    scores["DE"] = 0.98 if on_def_front and 0.50 <= abs_lat <= 2.00 else 0.06
-    scores["LB"] = 0.96 if 1.30 <= depth_los <= 4.2 and abs_lat <= 2.3 else (0.35 if 0.75 <= depth_los <= 3.0 else 0.08)
+    scores["DT"] = 0.98 if on_def_front and abs_lat <= 0.80 else 0.06
+    scores["DE"] = 0.98 if on_def_front and 0.50 <= abs_lat <= 2.20 else 0.06
+    scores["LB"] = 0.96 if 1.30 <= depth_los <= 4.2 and abs_lat <= 2.5 else (0.35 if 0.75 <= depth_los <= 3.0 else 0.08)
     scores["CB"] = 0.60 if abs_lat >= 2.2 and depth_los >= 0.0 else (0.22 if abs_lat >= 1.8 else 0.06)
 
     if depth_los >= 3.0:
@@ -78,46 +79,59 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     return scores
 
 
-def _infer_structural_endzone_ol_candidates(
+def _infer_structural_endzone_ol_roles(
     spatial_features: Dict[int, Dict[str, float]],
     action_role_scores: Dict[int, Dict[str, float]],
-) -> Set[int]:
-    """Infer the four non-center offensive linemen as a structural row around Center.
+) -> Dict[int, str]:
+    """Infer LT/LG/RG/RT relationally around the anchored Center.
 
-    The endzone projection can place a true OL slightly to either side of the Center's
-    zero-depth line, so a fixed depth sign is not reliable. Instead, select two candidates
-    on each lateral side that are closest to the Center row, while excluding tracks with
-    strong semantic evidence for QB/WR/RB/FB/TE. CP-SAT still decides the exact LT/LG/RG/RT
-    assignment using lateral ordering; this helper only supplies the OL family candidates.
+    Endzone tackles can appear much wider than a fixed normalized cutoff. The stable
+    invariant is relational: on offensive left (positive lateral) the nearer row member
+    is LG and the farther row member is LT; on offensive right (negative lateral) the
+    nearer member is RG and the farther member is RT.
+
+    Candidate ranking is dominated by closeness to the Center's depth row. Strong
+    semantic evidence for skill/backfield roles excludes a track from the OL family.
     """
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
-    candidates_by_side = {"left": [], "right": []}
+    by_side = {"left": [], "right": []}
 
     for tid, feat in spatial_features.items():
         dist_c = feat.get("dist_center", 0.0)
         lat = feat.get("lateral_offense", 0.0)
         depth = feat.get("depth_offense", 0.0)
-        abs_lat = abs(lat)
 
-        # Center itself and very wide/deep players are not non-center OL candidates.
-        if dist_c < 0.15 or abs_lat > 1.85 or abs(depth) > 1.35:
+        if dist_c < 0.15 or abs(depth) > 1.80 or abs(lat) < 0.05:
             continue
 
         a_scores = action_role_scores.get(tid, {})
         if max((a_scores.get(role, 0.0) for role in excluded_roles), default=0.0) >= 0.40:
             continue
 
-        # Prefer tracks aligned with the Center row. Slightly favor reasonable OL width
-        # so interior defenders stacked almost directly over Center do not dominate.
-        row_cost = abs(depth) + 0.08 * abs(abs_lat - 0.75)
+        # Slightly prefer the offensive side of the projection when two rows overlap,
+        # but tolerate small negative depth because true OL can project across zero.
+        defensive_side_penalty = 0.20 * max(0.0, -depth)
+        row_cost = abs(depth) + defensive_side_penalty
         side = "left" if lat > 0 else "right"
-        candidates_by_side[side].append((row_cost, tid))
+        by_side[side].append((row_cost, abs(lat), tid))
 
-    selected: Set[int] = set()
+    roles: Dict[int, str] = {}
     for side in ("left", "right"):
-        ranked = sorted(candidates_by_side[side], key=lambda item: (item[0], item[1]))
-        selected.update(tid for _, tid in ranked[:2])
-    return selected
+        # Choose the two tracks most consistent with the Center row, with no absolute
+        # width cutoff. Once selected, lateral distance determines guard vs tackle.
+        selected = sorted(by_side[side], key=lambda item: (item[0], item[1], item[2]))[:2]
+        if len(selected) < 2:
+            continue
+        selected_by_width = sorted(selected, key=lambda item: item[1])
+        inner_tid = selected_by_width[0][2]
+        outer_tid = selected_by_width[1][2]
+        if side == "left":
+            roles[inner_tid] = "LG"
+            roles[outer_tid] = "LT"
+        else:
+            roles[inner_tid] = "RG"
+            roles[outer_tid] = "RT"
+    return roles
 
 
 def _apply_endzone_role_family_semantics(
@@ -155,10 +169,10 @@ def compute_candidate_role_scores(
 
     candidate_scores: Dict[int, Dict[str, float]] = {}
     learned_probs: Dict[int, Dict[str, float]] = {}
-    structural_ol_tids = (
-        _infer_structural_endzone_ol_candidates(spatial_features, action_role_scores)
+    structural_ol_roles = (
+        _infer_structural_endzone_ol_roles(spatial_features, action_role_scores)
         if view == "endzone"
-        else set()
+        else {}
     )
 
     if learned_model and learned_model.is_fitted:
@@ -188,22 +202,19 @@ def compute_candidate_role_scores(
                 a_score,
             )
 
-            if dist_c >= 0.15:
-                if tid in structural_ol_tids:
-                    # Structural row membership is stronger than the noisy signed depth
-                    # threshold. Preserve side-specific exact-position differences but
-                    # make the OL family clearly preferable to DE/DT for these tracks.
-                    for role in ("LT", "LG", "RG", "RT"):
-                        geom_scores[role] = max(geom_scores.get(role, 0.0), 0.72)
-                    geom_scores["DE"] *= 0.20
-                    geom_scores["DT"] *= 0.20
-                    geom_scores["LB"] *= 0.35
-                else:
-                    # Non-row tracks should not fill fixed OL slots merely because the
-                    # solver needs five active linemen; missingness is preferable to a
-                    # clearly non-OL player stealing a tackle/guard slot.
-                    for role in ("LT", "LG", "RG", "RT"):
-                        geom_scores[role] *= 0.18
+            expected_ol_role = structural_ol_roles.get(tid)
+            if expected_ol_role:
+                # Make the relational role the clear geometry winner while keeping the
+                # other OL roles possible at low score for solver feasibility.
+                for role in ("LT", "LG", "RG", "RT"):
+                    geom_scores[role] = max(geom_scores.get(role, 0.0), 0.20)
+                geom_scores[expected_ol_role] = max(geom_scores.get(expected_ol_role, 0.0), 0.98)
+                geom_scores["DE"] *= 0.18
+                geom_scores["DT"] *= 0.18
+                geom_scores["LB"] *= 0.30
+            elif dist_c >= 0.15:
+                for role in ("LT", "LG", "RG", "RT"):
+                    geom_scores[role] *= 0.12
         else:
             geom_scores = _sideline_geometry_scores(depth_los, depth_off, lat_off, dist_c)
 
