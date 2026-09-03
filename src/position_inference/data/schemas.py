@@ -60,6 +60,11 @@ class TrackSummary:
     median_bbox_width: float
     median_footpoint: Optional[Tuple[float, float]] = None
     presnap_median_footpoint: Optional[Tuple[float, float]] = None
+    # Immutable position-inference anchor. Prefer the earliest reliable formation
+    # frame (normally frame 0); use a later pre-snap frame only when this track was
+    # absent/occluded at the primary anchor. ID-switch detection must never rewrite it.
+    formation_anchor_footpoint: Optional[Tuple[float, float]] = None
+    formation_anchor_frame: Optional[int] = None
     presnap_motion: Optional[float] = None
     validity_score: float = 1.0
     validity_flags: List[str] = field(default_factory=list)
