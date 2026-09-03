@@ -1,15 +1,20 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 import numpy as np
 
 from position_inference.data.schemas import TrackSummary
 
 
-def _position_footpoint(summary: TrackSummary):
-    return (
-        summary.formation_anchor_footpoint
-        or summary.presnap_median_footpoint
-        or summary.median_footpoint
-    )
+def _position_footpoint(summary: TrackSummary, view: str):
+    # Preserve the previously validated sideline behavior. The earliest-formation
+    # anchor is specifically needed for compressed endzone geometry, where later
+    # pre-snap movement can blur OL/DL separation.
+    if view == "endzone":
+        return (
+            summary.formation_anchor_footpoint
+            or summary.presnap_median_footpoint
+            or summary.median_footpoint
+        )
+    return summary.presnap_median_footpoint or summary.median_footpoint
 
 
 def compute_spatial_features(
@@ -17,19 +22,20 @@ def compute_spatial_features(
     center_track_id: Optional[int] = None,
     qb_track_id: Optional[int] = None,
     direction: str = "left",
+    view: str = "sideline",
 ) -> Dict[int, Dict[str, float]]:
-    """Compute normalized formation geometry from immutable position anchors.
+    """Compute normalized formation geometry in the offensive reference frame.
 
-    Position inference is anchored to the earliest reliable formation location. Later
-    pre-snap statistics remain available for motion/quality diagnostics, but they do not
-    move an already-established track's position geometry.
+    Sideline inference retains the proven pre-snap median geometry. Endzone inference
+    uses the immutable earliest-reliable formation anchor first, matching the manual
+    annotation workflow and preventing later pre-snap movement from redefining position.
     """
     features: Dict[int, Dict[str, float]] = {}
 
     player_summaries = {
         tid: t
         for tid, t in track_summaries.items()
-        if t.label == "player" and _position_footpoint(t)
+        if t.label == "player" and _position_footpoint(t, view)
     }
     if not player_summaries:
         return features
@@ -40,9 +46,9 @@ def compute_spatial_features(
         scale = 100.0
 
     if center_track_id and center_track_id in player_summaries:
-        center_fp = _position_footpoint(player_summaries[center_track_id])
+        center_fp = _position_footpoint(player_summaries[center_track_id], view)
     else:
-        fps = [_position_footpoint(t) for t in player_summaries.values()]
+        fps = [_position_footpoint(t, view) for t in player_summaries.values()]
         center_fp = (
             float(np.median([fp[0] for fp in fps])),
             float(np.median([fp[1] for fp in fps])),
@@ -52,7 +58,7 @@ def compute_spatial_features(
     c_arr = np.array([cx, cy], dtype=np.float64)
 
     qb_fp = (
-        _position_footpoint(player_summaries[qb_track_id])
+        _position_footpoint(player_summaries[qb_track_id], view)
         if qb_track_id and qb_track_id in player_summaries
         else None
     )
@@ -80,18 +86,18 @@ def compute_spatial_features(
     x_ranks = {
         tid: rank
         for rank, tid in enumerate(
-            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t])[0])
+            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t], view)[0])
         )
     }
     y_ranks = {
         tid: rank
         for rank, tid in enumerate(
-            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t])[1])
+            sorted(all_tids, key=lambda t: _position_footpoint(player_summaries[t], view)[1])
         )
     }
 
     for tid, summary in player_summaries.items():
-        fp = _position_footpoint(summary)
+        fp = _position_footpoint(summary, view)
         px, py = fp
         p_arr = np.array([px, py], dtype=np.float64)
         diff = p_arr - c_arr
@@ -109,7 +115,7 @@ def compute_spatial_features(
             dist_qb = float(np.linalg.norm(p_arr - np.array(qb_fp)) / scale)
 
         other_fps = [
-            _position_footpoint(player_summaries[o])
+            _position_footpoint(player_summaries[o], view)
             for o in all_tids
             if o != tid
         ]
