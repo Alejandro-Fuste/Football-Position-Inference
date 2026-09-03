@@ -76,15 +76,38 @@ def _endzone_geometry_scores(depth_los: float, depth_off: float, lat_off: float,
     return scores
 
 
+def _is_presnap_solver_eligible(summary: Optional[TrackSummary], snap_frame: Optional[int]) -> bool:
+    """Mirror the CP-SAT pre-snap candidate eligibility rule."""
+    if summary is None:
+        return False
+    if summary.label != "player" or getattr(summary, "validity_score", 1.0) < 0.30:
+        return False
+    if not (summary.presnap_median_footpoint or summary.median_footpoint):
+        return False
+    if summary.presnap_median_footpoint is None and snap_frame is not None and summary.first_frame > snap_frame:
+        return False
+    return True
+
+
 def _infer_structural_endzone_ol_roles(
     spatial_features: Dict[int, Dict[str, float]],
     action_role_scores: Dict[int, Dict[str, float]],
+    track_summaries: Dict[int, TrackSummary],
+    snap_frame: Optional[int] = None,
 ) -> Dict[int, str]:
-    """Infer LT/LG/RG/RT relationally around the anchored Center."""
+    """Infer LT/LG/RG/RT relationally around the anchored Center.
+
+    The structural scorer must use the same pre-snap candidate universe as CP-SAT. A late
+    track fragment must not receive the strong structural LT/LG/RG/RT score if the solver
+    will later exclude that track from pre-snap assignment.
+    """
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
     by_side = {"left": [], "right": []}
 
     for tid, feat in spatial_features.items():
+        if not _is_presnap_solver_eligible(track_summaries.get(tid), snap_frame):
+            continue
+
         dist_c = feat.get("dist_center", 0.0)
         lat = feat.get("lateral_offense", 0.0)
         depth = feat.get("depth_offense", 0.0)
@@ -144,6 +167,7 @@ def compute_candidate_role_scores(
     action_role_scores: Dict[int, Dict[str, float]],
     view: str = "sideline",
     learned_model: Optional[ViewSpecificRoleModel] = None,
+    snap_frame: Optional[int] = None,
 ) -> Dict[int, Dict[str, float]]:
     """Integrate action semantics, view-specific geometry, and optional learned probabilities."""
     weights = get_scoring_weights().get(f"{view}_weights", get_scoring_weights().get("weights", {}))
@@ -154,7 +178,12 @@ def compute_candidate_role_scores(
     candidate_scores: Dict[int, Dict[str, float]] = {}
     learned_probs: Dict[int, Dict[str, float]] = {}
     structural_ol_roles = (
-        _infer_structural_endzone_ol_roles(spatial_features, action_role_scores)
+        _infer_structural_endzone_ol_roles(
+            spatial_features,
+            action_role_scores,
+            track_summaries,
+            snap_frame=snap_frame,
+        )
         if view == "endzone"
         else {}
     )
