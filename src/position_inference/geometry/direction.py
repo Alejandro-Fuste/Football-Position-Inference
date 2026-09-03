@@ -3,12 +3,16 @@ from typing import Dict, Optional
 from position_inference.data.schemas import OffenseDirectionPrediction, TrackSummary
 
 
-def _anchor(summary: TrackSummary):
-    return (
-        summary.formation_anchor_footpoint
-        or summary.presnap_median_footpoint
-        or summary.median_footpoint
-    )
+def _anchor(summary: TrackSummary, view: str):
+    # Keep sideline direction inference on the previously validated pre-snap
+    # geometry. Use the immutable earliest-formation anchor only for endzone clips.
+    if view == "endzone":
+        return (
+            summary.formation_anchor_footpoint
+            or summary.presnap_median_footpoint
+            or summary.median_footpoint
+        )
+    return summary.presnap_median_footpoint or summary.median_footpoint
 
 
 def infer_offensive_direction(
@@ -17,14 +21,14 @@ def infer_offensive_direction(
     qb_track_id: Optional[int] = None,
     view: str = "sideline",
 ) -> OffenseDirectionPrediction:
-    """Infer view-relative offensive direction from the initial formation anchor."""
+    """Infer view-relative offensive direction using view-appropriate formation geometry."""
     evidence: Dict[str, float] = {}
 
     if center_track_id and qb_track_id:
         c_summary = track_summaries.get(center_track_id)
         q_summary = track_summaries.get(qb_track_id)
-        c_fp = _anchor(c_summary) if c_summary else None
-        q_fp = _anchor(q_summary) if q_summary else None
+        c_fp = _anchor(c_summary, view) if c_summary else None
+        q_fp = _anchor(q_summary, view) if q_summary else None
 
         if c_fp and q_fp:
             cx, cy = c_fp
@@ -49,9 +53,9 @@ def infer_offensive_direction(
             )
 
     fps = [
-        _anchor(t)
+        _anchor(t, view)
         for t in track_summaries.values()
-        if t.label == "player" and _anchor(t)
+        if t.label == "player" and _anchor(t, view)
     ]
     if fps:
         xs = [fp[0] for fp in fps]
