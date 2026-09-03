@@ -1,7 +1,14 @@
-from typing import Dict, List, Optional, Tuple
-import numpy as np
+from typing import Dict, Optional
 
 from position_inference.data.schemas import OffenseDirectionPrediction, TrackSummary
+
+
+def _anchor(summary: TrackSummary):
+    return (
+        summary.formation_anchor_footpoint
+        or summary.presnap_median_footpoint
+        or summary.median_footpoint
+    )
 
 
 def infer_offensive_direction(
@@ -10,27 +17,22 @@ def infer_offensive_direction(
     qb_track_id: Optional[int] = None,
     view: str = "sideline",
 ) -> OffenseDirectionPrediction:
-    """
-    Infers view-relative offensive direction (right, left, up, down) using Center/QB alignment,
-    OL formation orientation, and player placement.
-    """
+    """Infer view-relative offensive direction from the initial formation anchor."""
     evidence: Dict[str, float] = {}
 
-    # Signal 1: Center to QB relative vector
     if center_track_id and qb_track_id:
         c_summary = track_summaries.get(center_track_id)
         q_summary = track_summaries.get(qb_track_id)
+        c_fp = _anchor(c_summary) if c_summary else None
+        q_fp = _anchor(q_summary) if q_summary else None
 
-        if c_summary and q_summary and c_summary.presnap_median_footpoint and q_summary.presnap_median_footpoint:
-            cx, cy = c_summary.presnap_median_footpoint
-            qx, qy = q_summary.presnap_median_footpoint
-
+        if c_fp and q_fp:
+            cx, cy = c_fp
+            qx, qy = q_fp
             dx = qx - cx
             dy = qy - cy
 
-            # QB is behind Center. So offense plays in direction opposite to (QB - Center) vector
             if abs(dx) > abs(dy):
-                # Lateral view alignment
                 inferred_dir = "left" if dx > 0 else "right"
                 evidence["cq_dx"] = float(dx)
                 return OffenseDirectionPrediction(
@@ -38,40 +40,39 @@ def infer_offensive_direction(
                     confidence=0.92,
                     evidence=evidence,
                 )
-            else:
-                # Vertical view alignment (Endzone)
-                inferred_dir = "up" if dy > 0 else "down"
-                evidence["cq_dy"] = float(dy)
-                return OffenseDirectionPrediction(
-                    direction=inferred_dir,
-                    confidence=0.92,
-                    evidence=evidence,
-                )
+            inferred_dir = "up" if dy > 0 else "down"
+            evidence["cq_dy"] = float(dy)
+            return OffenseDirectionPrediction(
+                direction=inferred_dir,
+                confidence=0.92,
+                evidence=evidence,
+            )
 
-    # Signal 2: Footpoint spread distribution fallback
-    fps = [t.presnap_median_footpoint for t in track_summaries.values() if t.label == "player" and t.presnap_median_footpoint]
+    fps = [
+        _anchor(t)
+        for t in track_summaries.values()
+        if t.label == "player" and _anchor(t)
+    ]
     if fps:
         xs = [fp[0] for fp in fps]
         ys = [fp[1] for fp in fps]
-
         x_span = max(xs) - min(xs)
         y_span = max(ys) - min(ys)
 
         if view == "sideline" or x_span > y_span:
-            # Default sideline plays left-to-right or right-to-left
             evidence["fallback_span_ratio"] = float(x_span / max(y_span, 1.0))
             return OffenseDirectionPrediction(
                 direction="right",
                 confidence=0.60,
                 evidence=evidence,
             )
-        else:
-            evidence["fallback_span_ratio"] = float(y_span / max(x_span, 1.0))
-            return OffenseDirectionPrediction(
-                direction="up",
-                confidence=0.60,
-                evidence=evidence,
-            )
+
+        evidence["fallback_span_ratio"] = float(y_span / max(x_span, 1.0))
+        return OffenseDirectionPrediction(
+            direction="up",
+            confidence=0.60,
+            evidence=evidence,
+        )
 
     return OffenseDirectionPrediction(
         direction="right",
