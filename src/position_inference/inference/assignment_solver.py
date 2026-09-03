@@ -41,15 +41,14 @@ def solve_global_assignments(
     def_set = set(defense_track_ids)
 
     x: Dict[Tuple[int, str], cp_model.IntVar] = {}
-    has_any_presnap = any(
-        getattr(t, "presnap_median_footpoint", None) is not None for t in track_summaries.values()
-    )
 
     for t in all_tracks:
         t_sum = track_summaries.get(t)
         if t_sum:
-            if has_any_presnap and t_sum.presnap_median_footpoint is None:
-                continue
+            # A missing presnap footpoint must not remove an otherwise valid visible track
+            # from the CP-SAT candidate universe. Spatial feature extraction already falls
+            # back to median_footpoint when presnap geometry is unavailable, so the solver
+            # should use the same rule instead of forcing the corresponding slot to NV.
             if not (t_sum.presnap_median_footpoint or t_sum.median_footpoint):
                 continue
 
@@ -66,17 +65,14 @@ def solve_global_assignments(
     is_nv = {s: model.NewBoolVar(f"nv_{s}") for s in all_slots}
     is_unassigned = {t: model.NewBoolVar(f"unassigned_{t}") for t in all_tracks}
 
-    # Each track occupies one slot or remains noise/unassigned.
     for t in all_tracks:
         assigned_slots = [x[(t, s)] for s in all_slots if (t, s) in x]
         model.Add(sum(assigned_slots) + is_unassigned[t] == 1)
 
-    # Each active slot is either visible or not visible.
     for s in all_slots:
         track_vars = [x[(t, s)] for t in all_tracks if (t, s) in x]
         model.Add(sum(track_vars) + is_nv[s] == is_active[s])
 
-    # Flexible offense: six fixed positions plus five configured skill roles.
     fixed_off_dict = get_fixed_positions("offense")
     fixed_off_slots = [f"offense.{pos}_1" for pos in fixed_off_dict]
     for s in fixed_off_slots:
@@ -99,7 +95,6 @@ def solve_global_assignments(
         for idx in range(1, len(pos_slots)):
             model.Add(is_active[pos_slots[idx]] <= is_active[pos_slots[idx - 1]])
 
-    # Five-OL lateral order from the offense perspective.
     ol_slots_ordered = [
         ("offense.LT_1", "offense.LG_1"),
         ("offense.LG_1", "offense.C_1"),
@@ -117,7 +112,6 @@ def solve_global_assignments(
                     if lat1 <= lat2:
                         model.Add(x[(t1, left_s)] + x[(t2, right_s)] <= 1)
 
-    # WR/CB wing depth compatibility.
     wr_slots = [s for s in off_slots if "WR_" in s]
     cb_slots = [s for s in def_slots if "CB_" in s]
     for t1 in all_tracks:
@@ -137,13 +131,11 @@ def solve_global_assignments(
                         if (t1, ws) in x and (t2, cs) in x:
                             model.Add(x[(t1, ws)] + x[(t2, cs)] <= 1)
 
-    # Hard semantic anchors.
     if center_track_id and (center_track_id, "offense.C_1") in x:
         model.Add(x[(center_track_id, "offense.C_1")] == 1)
     if qb_track_id and (qb_track_id, "offense.QB_1") in x:
         model.Add(x[(qb_track_id, "offense.QB_1")] == 1)
 
-    # Flexible defense.
     model.Add(sum(is_active[s] for s in def_slots) == 11)
     def_bounds = get_personnel_bounds("defense")
     for pos in ("DE", "DT", "LB", "CB", "FS", "SS"):
@@ -170,14 +162,12 @@ def solve_global_assignments(
         for idx in range(1, len(pos_slots)):
             model.Add(is_active[pos_slots[idx]] <= is_active[pos_slots[idx - 1]])
 
-    # Pass 2 paired personnel counts are resolved formation constraints, not weak bonuses.
     if solver_pass >= 2 and personnel_priors:
         for pos, target_count in personnel_priors.items():
             pos_slots = [s for s in all_slots if f".{pos}_" in s]
             if pos_slots and 0 <= int(target_count) <= len(pos_slots):
                 model.Add(sum(is_active[s] for s in pos_slots) == int(target_count))
 
-    # Defensive level ordering.
     for t1 in all_tracks:
         for t2 in all_tracks:
             if t1 == t2:
@@ -203,8 +193,6 @@ def solve_global_assignments(
         score = candidate_scores.get(t, {}).get(pos, 0.0)
         obj_terms.append(int(score * 1000) * var)
 
-    # View-specific missingness priors. Endzone footage should strongly prefer visible
-    # interior/trench roles while allowing perimeter players to be outside the crop.
     for s in all_slots:
         pos = s.split(".")[1].split("_")[0]
         if view == "endzone":
@@ -223,8 +211,6 @@ def solve_global_assignments(
     for var in is_unassigned.values():
         obj_terms.append(-50 * var)
 
-    # In Pass 1 (or when priors are intentionally soft), personnel priors can still provide
-    # objective guidance. Pass 2 counts are already constrained exactly above.
     if personnel_priors and solver_pass < 2:
         for pos, target_count in personnel_priors.items():
             pos_slots = [s for s in all_slots if f".{pos}_" in s]
@@ -327,8 +313,6 @@ def solve_global_assignments(
             )
             continue
 
-        # Active slot with no visible track. Missingness confidence is intentionally low for
-        # endzone interior roles and higher only for perimeter roles supported by paired personnel.
         prior_supported = bool(personnel_priors and personnel_priors.get(pos, 0) > 0)
         if view == "endzone" and pos in {"WR", "CB", "FS", "SS"}:
             nv_conf = 0.60 + (0.15 if prior_supported else 0.0)
