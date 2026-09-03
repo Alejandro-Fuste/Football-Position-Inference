@@ -97,9 +97,11 @@ def _infer_structural_endzone_ol_roles(
 ) -> Dict[int, str]:
     """Infer LT/LG/RG/RT relationally around the anchored Center.
 
-    The structural scorer must use the same pre-snap candidate universe as CP-SAT. A late
-    track fragment must not receive the strong structural LT/LG/RG/RT score if the solver
-    will later exclude that track from pre-snap assignment.
+    The offensive and defensive fronts can project nearly on top of each other in an endzone
+    view. We therefore rank same-row candidates with an explicit preference for the offensive
+    side of the Center row while still tolerating a small negative projection caused by camera
+    perspective. This prevents a defender aligned directly over a guard from winning solely
+    because it is mathematically closer to zero depth.
     """
     excluded_roles = ("QB", "WR", "RB", "FB", "TE")
     by_side = {"left": [], "right": []}
@@ -119,8 +121,12 @@ def _infer_structural_endzone_ol_roles(
         if max((a_scores.get(role, 0.0) for role in excluded_roles), default=0.0) >= 0.40:
             continue
 
-        defensive_side_penalty = 0.20 * max(0.0, -depth)
-        row_cost = abs(depth) + defensive_side_penalty
+        # Positive depth is the offensive/backfield side. A defender across the LOS pays
+        # a substantially larger cost than a similarly displaced offensive lineman. The
+        # small positive-depth bonus breaks near-zero ties without making sign a hard gate.
+        defensive_side_penalty = 1.50 * max(0.0, -depth)
+        offensive_side_bonus = 0.10 * max(0.0, min(depth, 0.80))
+        row_cost = abs(depth) + defensive_side_penalty - offensive_side_bonus
         side = "left" if lat > 0 else "right"
         by_side[side].append((row_cost, abs(lat), tid))
 
