@@ -36,6 +36,7 @@ def partition_teams(
         center_track_id=center_track_id,
         qb_track_id=qb_track_id,
         direction=direction,
+        view=view,
     )
 
     offense_seeds: Set[int] = set()
