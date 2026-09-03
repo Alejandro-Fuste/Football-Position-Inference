@@ -117,6 +117,7 @@ def infer_video_positions(
         center_track_id=center_tid,
         qb_track_id=qb_tid,
         direction=dir_pred.direction,
+        view=view_pred.view,
     )
 
     off_tids, def_tids = partition_teams(
