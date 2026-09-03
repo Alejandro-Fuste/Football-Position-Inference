@@ -38,12 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_semantic_play_type(video_id: str, video_metadata: Optional[VideoMetadata]) -> Optional[str]:
-    """Prefer a specific play identity over a generic DatasetSummary category.
-
-    DatasetSummary may contain coarse categories such as ``Run``. Action-role rules need the
-    concrete play family (for example ``JetSweep``) when it can be safely derived from the
-    clip identifier. This keeps play-conditioned semantics general without hard-coding tracks.
-    """
+    """Prefer a specific play identity over a generic DatasetSummary category."""
     metadata_play = (video_metadata.play_type or "").strip() if video_metadata else ""
     generic_categories = {"run", "pass", "special teams", "specialteams", "unknown", ""}
     if metadata_play.lower() not in generic_categories:
@@ -154,6 +149,7 @@ def infer_video_positions(
         view=view_pred.view,
         personnel_priors=personnel_priors,
         solver_pass=solver_pass,
+        snap_frame=snap_frame,
     )
 
     personnel_hyp = extract_personnel_hypothesis(all_assignments)
