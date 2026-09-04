@@ -18,6 +18,11 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
+[project.optional-dependencies]
+field-poc = [
+    "pillow>=9.0",
+]
+
 [project.scripts]
 position-inference = "position_inference.cli:main"
 
@@ -28,4 +33,3 @@ norecursedirs = ["fixtures", "data", ".venv"]
 markers = [
     "integration: mark test as integration test",
 ]
-
