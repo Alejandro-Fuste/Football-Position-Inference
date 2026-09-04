@@ -1,0 +1,41 @@
+{
+  "video_id": "JetSweep_2",
+  "field_type": "NFL",
+  "coordinate_convention": {
+    "field_x": "longitudinal yards along the field",
+    "field_y": "lateral yards from one sideline toward the other",
+    "notes": "All field points must use one consistent NFL field coordinate system. Replace every example image coordinate before running the PoC."
+  },
+  "points": [
+    {
+      "label": "example_yardline_hash_1",
+      "image": [100.0, 100.0],
+      "field": [40.0, 23.58]
+    },
+    {
+      "label": "example_yardline_hash_2",
+      "image": [200.0, 100.0],
+      "field": [40.0, 29.75]
+    },
+    {
+      "label": "example_yardline_hash_3",
+      "image": [110.0, 200.0],
+      "field": [45.0, 23.58]
+    },
+    {
+      "label": "example_yardline_hash_4",
+      "image": [210.0, 200.0],
+      "field": [45.0, 29.75]
+    },
+    {
+      "label": "example_yardline_hash_5",
+      "image": [120.0, 300.0],
+      "field": [50.0, 23.58]
+    },
+    {
+      "label": "example_yardline_hash_6",
+      "image": [220.0, 300.0],
+      "field": [50.0, 29.75]
+    }
+  ]
+}
